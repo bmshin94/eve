@@ -51,9 +51,12 @@ export class SessionStateCursor {
     this.currentSessionState = sessionState;
   }
 
-  createStepInput(input: TurnStepPayload | undefined, abortSignal?: AbortSignal): TurnStepInput {
+  createStepInput(
+    input: TurnStepPayload | undefined,
+    signals: Pick<TurnStepInput, "abortSignal" | "steeringSignal">,
+  ): TurnStepInput {
     return {
-      abortSignal,
+      ...signals,
       input,
       sessionWritable: this.sessionWritable,
       serializedContext: this.currentSerializedContext,

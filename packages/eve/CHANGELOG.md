@@ -1,5 +1,90 @@
 # eve
 
+## 0.59.0
+
+### Minor Changes
+
+- 6ddfa9b: Eval session ownership is now explicit: `t.session()` creates an empty session, and every `t.send()` creates a fresh session and returns a turn with `.session` for follow-ups. Replace `t.newSession()` with `await t.session()`, move conversation state and operations from `t` to the session handle, and read replies from `turn.message`.
+- 7973fa2: Preserve dynamic tool validation through durable schema factories that replay the original captured values, including Zod refinements and transformations. Rebuild extensions with the current eve compiler; provider packages must wrap live dynamic schemas with `defineDurableSchema`, and resolver-local schema objects must be constructed inline or moved to module scope.
+- 9bff372: Use stable `@vercel/sandbox` v3.3 for Drive support instead of the obsolete beta alias. Vercel sandbox mount types now follow the stable SDK, including `snapshot` mounts.
+
+### Patch Changes
+
+- e301818: Account for effective instructions and tool schemas before each model call so dynamic capability growth triggers context compaction. Preserve provider-reported usage without counting unchanged schemas twice, and reserve room for the final request while compacting history.
+- 3121ca1: Show the model selected by a dynamic resolver beside `dynamic model` in the TUI footer. Update it as each model step starts and clear the previous selection when starting a new turn or resetting the session.
+- 6ddfa9b: Eval judges now retain the latest prompt across approval responses and stream reads, and include the text sent with file attachments.
+- 5b45f9b: Allow idle sessions with resumable subagents to move to a newer deployment. Parked and available child handles now remain usable after the parent session handoff instead of pinning the parent to its previous deployment.
+- 7e48f0e: Keep the dev TUI’s activity indicator animating while a background subagent is still running after its parent turn completes.
+- db5cee3: Add standalone `evaluate` to `eve/experimental/evaluate` for typed evaluations in tools and application code. It shares model authentication with `autoModel`, including the Gateway connection selected during `eve dev`.
+- 6ddfa9b: Fix frontend session resume so unused prewarmed sessions accept their first message and steering messages during resumed turns settle without leaving the composer busy.
+- 6ddfa9b: Create conversation sessions before their first turn through the eve HTTP channel, TypeScript client, eval drivers, and frontend bindings so applications can move durable session startup off the first-message path.
+  
+  Frontend bindings support opt-in `prewarm: true`, keep consuming the session stream across turns, and retry a starting inbox without waiting for stream events. Session initialization runs with the first message's identity and context.
+
+## 0.58.1
+
+### Patch Changes
+
+- 40f0c45: Fix `autoModel` to use `typesafe-ai/jev` and the `/login` Gateway connection during `eve dev`, while preserving custom AI SDK default providers.
+  Show `dynamic model` in the TUI footer instead of a missing-connection warning for dynamic selectors.
+
+## 0.58.0
+
+### Minor Changes
+
+- 9f301b6: Named workspace agent routes now use `/eve/<name>/v1/*` across `eve/next`, `eve/vercel`, and agent-only workspace builds. Update existing named-agent URLs to the new route; root single-agent routes remain at `/eve/v1/*`, and `eve/vercel` can now compose them.
+- bfc899d: Replace the Vercel-specific deployed self-modification credential configuration with an application-supplied GitHub credential provider. Generated Vercel setup now writes an inline `@vercel/connect` adapter, while the self-hosted PAT configuration remains available through `{ pat: true }`.
+
+### Patch Changes
+
+- 29af29d: Add experimental `autoModel` routing at `eve/experimental/evaluate`. It defaults to TypeSafe Jev through AI Gateway, accepts any AI SDK evaluation model, and chooses a Gateway model ID or provider model instance from the incoming task with per-option reasoning and per-turn retention.
+- 910bb45: Fix `turn.started` dynamic model, tool, skill, and subagent resolvers receiving an empty message snapshot. `ctx.messages` now includes visible conversation history and incoming input, including deferred session-limit turns and authorization resumes, with history projection preserved after memory recall.
+- ab5b8e9: Install integrations selected through the development TUI's `/add` command into the active workspace agent while keeping shared environment, Vercel, dependency, and deployment effects at the workspace root.
+- 987c3a0: Add development commands to generated hostless workspace services so `vercel dev --local` can start every agent. Default `defineWorkspaceAgent` transports route through the local Vercel service graph without deployment credentials.
+- 0fa8916: Add guided Microsoft Teams setup through `eve add channel/teams`. The flow delegates app creation, installation, and Activity routing to the Vercel Connect CLI, then scaffolds the Connect-backed channel.
+- fd9a007: Reorganize the `eve dev` command implementation without changing its behavior.
+- 16e11f9: Prevent multiline setup prompts, including the Vercel project-link question shown by `/add`, from being duplicated into TUI scrollback during repaints.
+
+## 0.57.0
+
+### Minor Changes
+
+- 61d4097: Run every conversational turn directly inside the session's owning workflow instead of dispatching a child turn run per message. An idle session hands its settled state to the exact deployment that accepted a new delivery, whether the delivery arrives through the session ID or any channel continuation address, keeping the original session ID and event stream and renewing the session's configured timeout. Deliveries that land while a handoff is in progress wait for the successor instead of starting a replacement session.
+  
+  Steering a running turn applies at the next committed step boundary without cancelling in-flight model or tool work and preserves the turn's identity and usage; input that arrives after the model has answered starts the next turn. `continuation.rekey()` is replaced by `continuation.alias()`: every claimed address stays active, and the most recently selected alias is exposed as `continuation.token`.
+  
+  Sessions from the former driver/turn execution model are imported on their next turn, preserving identity, history, and the original stream while interrupting pending work; drivers started before eve 0.45 are reported inactive and their channel starts a fresh session. Retain the original deployment until imported sessions end, and retire sessions before rolling back across this boundary.
+
+### Patch Changes
+
+- 32aca9b: Restored `agent` tools now dispatch through the shared subagent workflow when framework defaults are disabled.
+- 7b17b27: Simplify the TUI footer by removing the local port and separating the model and connection with dots. Vercel account connections show the resolved team slug instead of a team ID.
+- f21e63f: Declare `.vercel/output` for generated eve services so Vercel consumes the Build Output API directory that their build commands produce instead of looking for the framework preset's `.output` default.
+- 7b17b27: Model login shares resolved credentials with the running agent, avoids rebuilds for account, team, and key changes, and refreshes agent information without delaying chat. Clear status messages show when to finish browser sign-in and what eve is waiting for, without flashing indicators for quick steps.
+- e1ae8eb: Flush the final activity snapshot when an activity stream closes during the render debounce window.
+- f21e63f: Make `withEve` discover a containing workspace when Vercel evaluates `vercel.ts` from its temporary `.vercel` directory.
+- fe6451c: Keep automatic prompt caching enabled when local model authentication resolves an AI Gateway model to a provider object. Anthropic models retain cache reuse after signing in through `eve dev`.
+- 032860c: Bound negotiated session stream responses with renewable leases so abandoned serverless invocations release their durable stream readers. The eve client renews these responses from its cursor without exposing transport heartbeats or lease records as session events; tail-relative reads and streams with reconnection disabled remain unleased.
+- 7b17b27: Fix a local workflow health-check failure after model or source changes. Capability probes no longer look up a run before it exists, avoiding a spurious queue error and startup delay.
+- 7b17b27: Allow switching Vercel teams through `/login` by always showing the team picker when multiple teams are available. The current team is highlighted rather than silently selected; automatic startup still reuses the saved connection.
+- 7b17b27: Match the Vercel label's color to the surrounding model and team text in the TUI footer.
+- ba0b866: When a self-modified tool or capability later fails or behaves incorrectly, the agent now offers to delegate a repair. It waits for your confirmation before sending the observed and expected behavior back to self-modification.
+- 7b17b27: Use the same full-size arrow for empty and populated TUI prompts, with the empty arrow in the terminal's default foreground color for better visibility.
+- 7b17b27: Open the TUI directly after init, connect models through `/login` without requiring a Vercel project, and store local credentials securely. Add direct OpenAI and Anthropic model helpers, apply model selections immediately, and simplify menus and `/add` to get to chat sooner. Vercel CLI installation and login now run during deployment instead of separate `/vc:install` and `/vc:login` commands.
+- 8bb62e2: Recognize AI Gateway credit-balance and project-budget refusals in semantic error summaries.
+- 7b17b27: Restore guided Trusted Sources setup when Deployment Protection blocks `eve dev --url`. eve reuses the existing Vercel CLI session, asks before changing project access, and verifies the connection before returning to chat.
+- 7b17b27: Use the base release version for default sandbox images when running commit or git-ref tarballs. Build metadata such as `+git.<sha>` no longer produces invalid image tags for Docker, microsandbox, or Vercel Sandbox.
+- 7b17b27: Search `/add` by capabilities such as iMessage or SMS, as well as item names and addresses. The picker now searches catalog titles and descriptions without adding extra text to menu rows.
+- a08e4bb: Prompt for and resolve the target Vercel project before configuring production self-modification, and scope GitHub connector creation and attachment to that project's owner.
+- 7b17b27: Keep the composer available while startup connects your model and prepares chat, with animated progress and prompts only when input is needed. Preserve drafts and queued messages through setup, and announce readiness only after the runtime refresh succeeds.
+- 61d4097: Batch closely spaced stream events on Vercel within a 10 ms window to reduce network writes. Explicit Workflow stream-flush overrides remain supported.
+- 53fad6c: Emits canonical GenAI cache-write tokens, reports the provider-confirmed response model, and adds the executing agent name to tool spans.
+- 7b17b27: Replace rotating TUI prompt suggestions with a stable “Send a message…” placeholder that does not assume agent capabilities.
+- fe6451c: Apply steering in the core runtime before a pending model request produces an answer, continuing the same turn with the correction across clients and channels. Preserve executing tools and their results, prevent duplicate in-process model execution on background wakeups, and keep boundary steering after assistant output begins.
+- 7b17b27: Pressing Enter during a TUI response now steers the active agent immediately instead of queuing the message until the turn finishes. Startup messages and sessions without steering support continue to queue.
+- 7b17b27: Distinguish steered TUI messages with a yellow left gutter instead of an extra arrow row. Queued messages also render without an arrow row.
+- 1e6437b: Announce when dynamic skills are withdrawn completely so agents do not retain stale skill lists.
+
 ## 0.56.0
 
 ### Minor Changes

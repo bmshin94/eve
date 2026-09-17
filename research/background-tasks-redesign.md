@@ -186,7 +186,7 @@ superseded task deliveries for suppression.
 ## Compatibility and migration
 
 This is a breaking authoring change, so the prototype includes a minor changeset and updated public
-docs. Extension capability generation records `tool` epoch 45 and `dynamicTool` epoch 42. Channel epoch 24 removes executor bindings from task views and drops epoch 23. The authoring change also
+docs. Extension capability generation records `tool` epoch 48 and `dynamicTool` epoch 46. Channel epoch 26 removes executor bindings from task views. Main's published epoch reports are retained; the new epochs drop the preceding tool (47), dynamic-tool (45), and channel (25) contracts. The authoring change also
 drops retained epochs that explicitly exercised the removed surfaces: tool epoch 28, dynamic-tool
 epochs 28–30, and the previous current epochs 44 and 41.
 

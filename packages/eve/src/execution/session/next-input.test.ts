@@ -50,6 +50,9 @@ function createMockInbox(reads: readonly ScriptedRead[]): SessionInbox {
       if (read.result.done) return undefined;
       return read.result.value;
     },
+    onDelivery() {
+      return () => {};
+    },
     onInterrupt() {
       return () => {};
     },
@@ -409,6 +412,7 @@ describe("nextTurnDelivery routing", () => {
       drain: vi.fn(() => commands.splice(0)),
       hasPending: vi.fn(() => commands.length > 0),
       next: vi.fn(async () => commands.shift()),
+      onDelivery: vi.fn(() => () => {}),
       onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
     };

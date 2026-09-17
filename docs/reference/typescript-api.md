@@ -35,6 +35,7 @@ export default defineTool({
 | `defineAgent`                                         | `eve`                                                                   | `agent/agent.ts`                                                                       | [agent.ts](../agent-config)                            |
 | `defineTool`                                          | `eve/tools`                                                             | `agent/tools/<name>.ts`                                                                | [Tools](../tools)                                      |
 | `defineDurableCallback`                               | `eve/tools`                                                             | provider-package dynamic tool factories                                                | [Dynamic capabilities](../guides/dynamic-capabilities) |
+| `defineDurableSchema`                                 | `eve/tools`                                                             | provider-package dynamic input and output schemas                                      | [Dynamic capabilities](../guides/dynamic-capabilities) |
 | `defineWorkflowTool`                                  | `eve/tools`                                                             | `agent/tools/<name>.ts`                                                                | [Workflow tools](../tools/workflows)                   |
 | `defineDynamic`                                       | `eve`, `eve/tools`, `eve/skills`, `eve/instructions`, `eve/connections` | dynamic model or subagent `agent.ts`; `agent/{tools,skills,instructions,connections}/` | [Dynamic capabilities](../guides/dynamic-capabilities) |
 | `defineMcpClientConnection`                           | `eve/connections`                                                       | `agent/connections/<name>.ts`                                                          | [MCP connections](../connections/mcp)                  |
@@ -55,7 +56,7 @@ export default defineTool({
 | `mockModel`                                           | `eve/evals`                                                             | Deterministic fixture agent models                                                     | [Evals](../evals/overview)                             |
 | `useEveAgent`                                         | `eve/react`, `eve/vue`, `eve/svelte`                                    | frontend                                                                               | [Frontend](../guides/frontend/overview)                |
 
-Tool-wide authoring helpers and types such as `defineTool`, `defineWorkflowTool`, `defineDurableCallback`, `defineDynamic`, `disableTool`, and `ToolLabelDefinition` come from `eve/tools`. Capability-specific definitions and helpers use their own subpaths (see [Built-in tools](../concepts/built-in-tools)): reusable definitions such as `bash` and `glob` come from `eve/tools/<name>`, `webSearch` comes from `eve/tools/web_search`, `sleep` comes from `eve/tools/sleep`, and approval policies and types come from `eve/tools/approval`. The route verbs `GET`/`HEAD`/`POST`/`PUT`/`PATCH`/`DELETE`/`OPTIONS`/`WS` plus `disableRoute` come from `eve/channels`, and the channel auth helpers `localDev`/`vercelOidc`/`placeholderAuth` come from `eve/channels/auth`.
+Tool-wide authoring helpers and types such as `defineTool`, `defineWorkflowTool`, `defineDurableCallback`, `defineDurableSchema`, `defineDynamic`, `disableTool`, and `ToolLabelDefinition` come from `eve/tools`. Capability-specific definitions and helpers use their own subpaths (see [Built-in tools](../concepts/built-in-tools)): reusable definitions such as `bash` and `glob` come from `eve/tools/<name>`, `webSearch` comes from `eve/tools/web_search`, `sleep` comes from `eve/tools/sleep`, and approval policies and types come from `eve/tools/approval`. The route verbs `GET`/`HEAD`/`POST`/`PUT`/`PATCH`/`DELETE`/`OPTIONS`/`WS` plus `disableRoute` come from `eve/channels`, and the channel auth helpers `localDev`/`vercelOidc`/`placeholderAuth` come from `eve/channels/auth`.
 
 `AgentReasoningDefinition` is exported from `eve` for the top-level `defineAgent({ reasoning })` setting. `AgentLimitsDefinition` is exported for `defineAgent({ limits })`. `AgentWorkflowDefinition`, `AgentWorkflowRetentionDefinition`, and `AgentWorkflowWorldDefinition` are exported from `eve` for the `defineAgent({ experimental: { workflow } })` config shape. `WebSearchToolInput` and `WebSearchProvider` are exported from `eve/tools/web_search`.
 
@@ -109,40 +110,42 @@ import template from "../../prompts/template.txt?raw";
 
 ## Imports at a glance
 
-| Import                                                                      | Holds                                                                                                   |
-| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `eve`                                                                       | `defineAgent`, `defineRemoteAgent`, `defineDynamic`, agent config types                                 |
-| `eve/tools`                                                                 | `defineTool`, `defineWorkflowTool`, `defineDurableCallback`, `defineDynamic`, `disableTool`, tool types |
-| `eve/tools/{bash,read_file,write_file,todo,web_fetch,load_skill,glob,grep}` | Individual reusable tool definitions                                                                    |
-| `eve/tools/approval`                                                        | Approval types and `always`, `once`, `never`                                                            |
-| `eve/tools/web_search`                                                      | Provider-managed `webSearch` configuration                                                              |
-| `eve/tools/workflow`                                                        | Runtime-generated `workflow` tool factory                                                               |
-| `eve/tools/sleep`                                                           | Opt-in durable `sleep` tool                                                                             |
-| `eve/connections`                                                           | `defineMcpClientConnection`, `defineOpenAPIConnection`, `defineDynamic`                                 |
-| `eve/channels`                                                              | `defineChannel`, `disableRoute`, route verbs                                                            |
-| `eve/channels/eve`                                                          | `eveChannel`                                                                                            |
-| `eve/channels/auth`                                                         | `localDev`, `vercelOidc`, `placeholderAuth`                                                             |
-| `eve/channels/{slack,discord,teams,telegram,twilio,github}`                 | platform channel factories                                                                              |
-| `eve/hooks`                                                                 | `defineHook`                                                                                            |
-| `eve/schedules`                                                             | `defineSchedule`                                                                                        |
-| `eve/skills`                                                                | `defineSkill`, `defineDynamic`                                                                          |
-| `eve/instructions`                                                          | `defineInstructions`, `defineDynamic`                                                                   |
-| `eve/memory`                                                                | `defineMemory`, `defineMemoryProvider`, provider and lifecycle types                                    |
-| `eve/memory/scope`                                                          | `byPrincipal` and memory scope helpers                                                                  |
-| `eve/memory/file`                                                           | `fileMemory`, `inMemory`, and the conditional document backend contract                                 |
-| `eve/memory/file/vercel`                                                    | `vercelBlob` and Vercel Blob backend options                                                            |
-| `eve/context`                                                               | `defineState`, session and state types                                                                  |
-| `eve/sandbox`                                                               | `defineSandbox`, backends                                                                               |
-| `eve/instrumentation`                                                       | `defineInstrumentation`, `isChannel`                                                                    |
-| `eve/local-dev`                                                             | `getLocalDevCapability`, `LocalDevCapability`                                                           |
-| `eve/models/openai`                                                         | `chatgpt`, deprecated `experimental_chatgpt`                                                            |
-| `eve/evals`                                                                 | `defineEval`, `defineEvalConfig`, `mockModel`, eval types                                               |
-| `eve/evals/expect`                                                          | `includes`, `equals`, `matches`, `similarity`                                                           |
-| `eve/evals/reporters`                                                       | `Braintrust`, `JUnit`, `EvalReporter`                                                                   |
-| `eve/evals/loaders`                                                         | `loadJson`, `loadYaml`                                                                                  |
-| `eve/react`, `eve/vue`, `eve/svelte`                                        | `useEveAgent`                                                                                           |
-| `eve/next`, `eve/nuxt`, `eve/sveltekit`                                     | framework bundler plugins                                                                               |
-| [`eve/client`](../guides/client/overview)                                   | `Client`, `ClientSession`, health and agent-info schemas, response errors                               |
+| Import                                                                      | Holds                                                                                                                          |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `eve`                                                                       | `defineAgent`, `defineRemoteAgent`, `defineDynamic`, agent config types                                                        |
+| `eve/tools`                                                                 | `defineTool`, `defineWorkflowTool`, `defineDurableCallback`, `defineDurableSchema`, `defineDynamic`, `disableTool`, tool types |
+| `eve/tools/{bash,read_file,write_file,todo,web_fetch,load_skill,glob,grep}` | Individual reusable tool definitions                                                                                           |
+| `eve/tools/approval`                                                        | Approval types and `always`, `once`, `never`                                                                                   |
+| `eve/tools/web_search`                                                      | Provider-managed `webSearch` configuration                                                                                     |
+| `eve/tools/workflow`                                                        | Runtime-generated `workflow` tool factory                                                                                      |
+| `eve/tools/sleep`                                                           | Opt-in durable `sleep` tool                                                                                                    |
+| `eve/connections`                                                           | `defineMcpClientConnection`, `defineOpenAPIConnection`, `defineDynamic`                                                        |
+| `eve/channels`                                                              | `defineChannel`, `disableRoute`, route verbs                                                                                   |
+| `eve/channels/eve`                                                          | `eveChannel`                                                                                                                   |
+| `eve/channels/auth`                                                         | `localDev`, `vercelOidc`, `placeholderAuth`                                                                                    |
+| `eve/channels/{slack,discord,teams,telegram,twilio,github}`                 | platform channel factories                                                                                                     |
+| `eve/hooks`                                                                 | `defineHook`                                                                                                                   |
+| `eve/schedules`                                                             | `defineSchedule`                                                                                                               |
+| `eve/skills`                                                                | `defineSkill`, `defineDynamic`                                                                                                 |
+| `eve/instructions`                                                          | `defineInstructions`, `defineDynamic`                                                                                          |
+| `eve/memory`                                                                | `defineMemory`, `defineMemoryProvider`, provider and lifecycle types                                                           |
+| `eve/memory/scope`                                                          | `byPrincipal` and memory scope helpers                                                                                         |
+| `eve/memory/file`                                                           | `fileMemory`, `inMemory`, and the conditional document backend contract                                                        |
+| `eve/memory/file/vercel`                                                    | `vercelBlob` and Vercel Blob backend options                                                                                   |
+| `eve/context`                                                               | `defineState`, session and state types                                                                                         |
+| `eve/sandbox`                                                               | `defineSandbox`, backends                                                                                                      |
+| `eve/instrumentation`                                                       | `defineInstrumentation`, `isChannel`                                                                                           |
+| `eve/local-dev`                                                             | `getLocalDevCapability`, `LocalDevCapability`                                                                                  |
+| `eve/models/openai`                                                         | `openai`, `chatgpt`, deprecated `experimental_chatgpt`                                                                         |
+| `eve/models/anthropic`                                                      | `anthropic`                                                                                                                    |
+| [`eve/experimental/evaluate`](../guides/evaluate)                           | Experimental `autoModel` and standalone `evaluate`                                                                             |
+| `eve/evals`                                                                 | `defineEval`, `defineEvalConfig`, `mockModel`, eval types                                                                      |
+| `eve/evals/expect`                                                          | `includes`, `equals`, `matches`, `similarity`                                                                                  |
+| `eve/evals/reporters`                                                       | `Braintrust`, `JUnit`, `EvalReporter`                                                                                          |
+| `eve/evals/loaders`                                                         | `loadJson`, `loadYaml`                                                                                                         |
+| `eve/react`, `eve/vue`, `eve/svelte`                                        | `useEveAgent`                                                                                                                  |
+| `eve/next`, `eve/nuxt`, `eve/sveltekit`                                     | framework bundler plugins                                                                                                      |
+| [`eve/client`](../guides/client/overview)                                   | `Client`, `ClientSession`, health and agent-info schemas, response errors                                                      |
 
 Exported types ship from the same entrypoint as the helper they describe (for example `ToolDefinition` and `ToolContext` from `eve/tools`). The `exports` field in `packages/eve/package.json` lists every public entrypoint.
 
@@ -169,9 +172,15 @@ The function returns `LocalDevCapability | undefined`. It returns a capability o
 
 Run source mutations inside `withSuspendedSource()`. It acquires a unique watcher lease, waits for your asynchronous callback to settle, and then releases the lease. Concurrent or nested calls cannot resume each other early, and releasing the final lease rebuilds the runtime artifacts. The callback's return value is returned, and its error is rethrown after release. If suspension cannot be acquired, the callback does not run. If the host cannot confirm release after a retry, the method throws an actionable error; restart `eve dev` before making more source changes.
 
+## Direct provider models
+
+`openai(model?)` from `eve/models/openai` and `anthropic(model?)` from `eve/models/anthropic` return eve-owned model instances using the vendored providers. They accept only an optional model ID. Defaults are `gpt-5.6-luna-fast` and `claude-sonnet-5`, respectively.
+
+Use `/login` for local credentials, or set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. Local secret-store discovery is disabled in deployments; provision server credentials explicitly. See [Set the model](../agent-config#set-the-model) for an example.
+
 ## ChatGPT subscription models
 
-`chatgpt()` from `eve/models/openai` serves an OpenAI model through your local ChatGPT login and bills the ChatGPT subscription. With no argument, it selects `gpt-5.6-sol`:
+`chatgpt()` from `eve/models/openai` serves an OpenAI model through your local ChatGPT login and bills the ChatGPT subscription. With no argument, it selects `gpt-5.6-luna-fast`:
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
@@ -188,7 +197,7 @@ Pass another bare OpenAI model slug to override the default. `experimental_chatg
 
 eve uses one local authentication path with two credential owners:
 
-1. Run `eve dev`, open `/model`, and select **Provider** → **ChatGPT subscription**.
+1. Run `eve dev`, open `/login`, and select **ChatGPT subscription**.
 2. If `codex` is on `PATH`, eve uses `codex app-server` and launches `codex login` when sign-in is needed. Codex owns credential storage and refresh.
 3. If the Codex binary is not found, eve falls back to direct browser sign-in and owns the saved session and refresh. If the browser does not open, use the URL printed in the terminal.
 
@@ -206,9 +215,9 @@ ChatGPT subscription credentials are local user credentials. `eve deploy` blocks
 
 Troubleshooting:
 
-- **`chatgpt-sub login`**: open `/model` and select **Provider** → **ChatGPT subscription** to sign in again. eve launches `codex login` when Codex is available, or its direct sign-in flow when it is not.
+- **`chatgpt-sub login`**: open `/login` and select **ChatGPT subscription** to sign in again. eve launches `codex login` when Codex is available, or its direct sign-in flow when it is not.
 - **`chatgpt-sub unavailable` with Codex installed**: update or restart Codex and retry. eve does not mask app-server failures by switching to a different saved session.
-- **`chatgpt-sub unavailable` without Codex**: follow the reported OS credential-store recovery steps, or check your network connection if token refresh failed. Retry from `/model`. If eve reports an invalid stored session, sign in again to replace it.
+- **`chatgpt-sub unavailable` without Codex**: follow the reported OS credential-store recovery steps, or check your network connection if token refresh failed. Retry from `/login`. If eve reports an invalid stored session, sign in again to replace it.
 - **Model rejected by the backend**: model availability depends on the signed-in ChatGPT account. Pick another supported OpenAI model.
 - **Device sign-in unavailable**: enable device code authorization in ChatGPT security settings, or sign in from a local terminal with port 1455 available.
 
@@ -216,4 +225,4 @@ Troubleshooting:
 
 - [`agent.ts`](../agent-config): the agent config these helpers configure
 - [Tools](../tools): `defineTool`, the most-used helper
-- [Project layout](../getting-started#project-layout): where each define\* lives on disk
+- [Agent Files](/docs/reference/agent-files): where each define\* lives on disk

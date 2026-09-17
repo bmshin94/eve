@@ -34,9 +34,11 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 import { serializeContext } from "#context/serialize.js";
 import { getPendingCoordinationBatch, setPendingCoordinationBatch } from "#harness/coordination.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
+import { setHarnessEmissionState } from "#harness/emission-state.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { appendPendingInputBatch } from "#harness/input-requests.js";
+import { queueDeferredStepInput } from "#harness/pending-input-batches.js";
 import type { HarnessSession, StepFn, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry, createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import {
@@ -55,6 +57,7 @@ import {
 } from "#execution/durable-session-store.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { defineTool } from "#tools/definition.js";
+import { defineMemory } from "#public/memory/index.js";
 import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
@@ -1002,6 +1005,76 @@ describe("dispatchCoordinationStep", () => {
 });
 
 describe("turnStep", () => {
+  it("resumes an interrupted turn when the channel ignores the correction", async () => {
+    const originalAuth: SessionAuthContext = {
+      attributes: {},
+      authenticator: "test",
+      issuer: "test",
+      principalId: "alice",
+      principalType: "user",
+      subject: "alice",
+    };
+    const correctionAuth = { ...originalAuth, principalId: "bob", subject: "bob" };
+    const adapter: ChannelAdapter = {
+      kind: "ignore-correction",
+      state: { reply: { recipient: "alice" } },
+      deliver: (_payload, adapterCtx) => {
+        expect(adapterCtx.ctx.get(AuthKey)).toEqual(correctionAuth);
+        (adapterCtx.state.reply as { recipient: string }).recipient = "bob";
+        return undefined;
+      },
+    };
+    const bundle = Object.assign({}, createTurnStepTestBundle() as object, {
+      adapterRegistry: { adaptersByKind: new Map([[adapter.kind, adapter]]) },
+    }) as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
+    const emissionState = { sequence: 0, sessionStarted: true, stepIndex: 1, turnId: "turn_0" };
+    const session = setHarnessEmissionState(
+      createStubSession({ history: [{ role: "user", kind: "user", content: "Original request" }] }),
+      emissionState,
+    );
+    installSessionStoreMocks([session]);
+    const execute = vi.fn(async (current: HarnessSession): Promise<StepResult> => {
+      expect(loadContext().get(AuthKey)).toEqual(originalAuth);
+      expect(loadContext().get(TurnDeliveryIdsKey)).toEqual(["original-delivery"]);
+      expect(loadContext().get(ChannelKey)?.state).toEqual({ reply: { recipient: "alice" } });
+      return { next: { done: true, output: "Original answer" }, session: current };
+    });
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => execute);
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, originalAuth);
+    ctx.set(TurnDeliveryIdsKey, ["original-delivery"]);
+    ctx.set(BundleKey, bundle);
+    ctx.set(ChannelKey, adapter);
+    ctx.set(ContinuationTokenKey, "ignore-correction");
+    ctx.set(ModeKey, "conversation");
+    ctx.set(SessionIdKey, "sess-test");
+
+    const result = await turnStep({
+      input: {
+        auth: correctionAuth,
+        kind: "deliver",
+        payloads: [{ message: "Ignored correction" }],
+        deliveryMetadata: [
+          {
+            channelKind: adapter.kind,
+            channelName: adapter.kind,
+            deliveryId: "ignored-delivery",
+            payloadIndex: 0,
+          },
+        ],
+      },
+      sessionWritable: createTestWritable(),
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState({ emissionState }),
+    });
+    expect(result).toMatchObject({ action: "done", output: "Original answer" });
+    expect(execute).toHaveBeenCalledOnce();
+    expect(execute.mock.calls[0]?.[0].history).toEqual(session.history);
+    expect(result.sessionState.emissionState.turnId).toBe("turn_0");
+    expect(result.serializedContext[AuthKey.name]).toEqual(originalAuth);
+    expect(result.serializedContext[TurnDeliveryIdsKey.name]).toEqual(["original-delivery"]);
+  });
   it("keeps one task stream open while hiding a scheduled fallback from delivery hooks", async () => {
     const appended: string[] = [];
     const delivered: Array<string | null> = [];
@@ -2202,6 +2275,38 @@ describe("turnStep", () => {
     });
   });
 
+  it("keeps a settled turn when cancellation arrives after its waiting boundary", async () => {
+    const controller = new AbortController();
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => {
+        controller.abort(new TurnCancelledError());
+        return {
+          next: null,
+          session: stepSession,
+          settledTurn: { output: "settled answer" },
+        };
+      };
+    });
+
+    const result = await turnStep({
+      abortSignal: controller.signal,
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "hello" }],
+      },
+      sessionWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result).toMatchObject({
+      action: "park",
+      settled: { output: "settled answer" },
+    });
+  });
+
   it("reports each settled turn's usage as a delta, not the cumulative session totals", async () => {
     const usageStateAfterTurn = (
       totals: Readonly<Record<string, number>>,
@@ -2976,7 +3081,14 @@ describe("turnStep", () => {
     ]);
   });
 
-  it("clears pending authorization after a matching callback resumes the turn", async () => {
+  it.each([
+    [false, "none"],
+    [true, "none"],
+    [false, "current"],
+    [true, "current"],
+    [false, "deferred"],
+    [true, "deferred"],
+  ] as const)("auth resume (%s, %s)", async (withMemory, inputKind) => {
     const challenge = {
       attemptId: "attempt-statuspage",
       challenge: {
@@ -2999,11 +3111,39 @@ describe("turnStep", () => {
     const instructionHandler = vi.fn(
       (_event: unknown, _context: { readonly messages: readonly ModelMessage[] }) => null,
     );
+    const toolHandler = vi.fn(
+      (_event: unknown, _context: { readonly messages: readonly ModelMessage[] }) => null,
+    );
+    const recall = vi.fn(async () => ({
+      messages: [{ content: "Recalled context", id: "item" }],
+    }));
+    const memories = withMemory
+      ? [
+          {
+            ...defineMemory({
+              namespace: "test",
+              scope: "alice",
+              provider: { recall: { "turn.started": recall } },
+            }),
+            logicalPath: "memory/profile.ts",
+            slot: "profile",
+            sourceId: "memory/profile.ts",
+            sourceKind: "module",
+            visibility: "scope",
+          },
+        ]
+      : [];
     const session = createStubSession({
       history: [{ content: "visible", kind: "user", role: "user" }, hidden],
       state: setPendingAuthorization({ retained: "yes" }, { challenges: [challenge] }),
     });
-    installSessionStoreMocks([session]);
+    const turnInput = {
+      context: ["Current context"],
+      message: "Alice follows up after signing in.",
+    };
+    installSessionStoreMocks([
+      inputKind === "deferred" ? queueDeferredStepInput(session, turnInput) : session,
+    ]);
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       adapterRegistry: {
         adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
@@ -3012,6 +3152,7 @@ describe("turnStep", () => {
       graph: {
         nodesByNodeId: new Map(),
         root: {
+          agent: { memories, connections: [] },
           sandboxRegistry: { sandbox: null },
           turnAgent: TestTurnAgent,
         },
@@ -3020,6 +3161,16 @@ describe("turnStep", () => {
       hookRegistry: createEmptyHookRegistry(),
       resolvedAgent: {
         config: {},
+        dynamicToolResolvers: [
+          {
+            eventNames: ["turn.started"],
+            events: { "turn.started": toolHandler },
+            logicalPath: "tools/auth.ts",
+            slug: "auth",
+            sourceId: "tools/auth.ts",
+            sourceKind: "module",
+          },
+        ],
         dynamicInstructionsResolvers: [
           {
             eventNames: ["session.started", "turn.started"],
@@ -3053,6 +3204,7 @@ describe("turnStep", () => {
       input: {
         kind: "deliver",
         payloads: [
+          ...(inputKind === "current" ? [turnInput] : []),
           {
             authorizationCallback: {
               attemptId: "attempt-statuspage",
@@ -3068,7 +3220,9 @@ describe("turnStep", () => {
     });
 
     expect(observedPendingAuth).toBeUndefined();
-    expect(observedStepInput).toBeUndefined();
+    expect(observedStepInput).toEqual(
+      inputKind === "current" ? { message: `thread=unset; user=${turnInput.message}` } : undefined,
+    );
     expect(result).toMatchObject({
       action: "park",
       hasPendingAuthorization: false,
@@ -3086,6 +3240,31 @@ describe("turnStep", () => {
       });
     }
     expect(persistedSession?.history).toContain(hidden);
+    const expectedInput =
+      inputKind === "none"
+        ? []
+        : inputKind === "current"
+          ? [{ content: `thread=unset; user=${turnInput.message}`, kind: "user", role: "user" }]
+          : [
+              { content: "Current context", kind: "context.instruction", role: "user" },
+              { content: "Alice follows up after signing in.", kind: "user", role: "user" },
+            ];
+    expect(toolHandler).toHaveBeenCalledOnce();
+    expect(toolHandler.mock.calls[0]?.[1].messages).toEqual([
+      { content: "visible", kind: "user", role: "user" },
+      ...(withMemory ? [{ content: "Recalled context", kind: "memory.load", role: "user" }] : []),
+      ...expectedInput,
+    ]);
+    if (withMemory) {
+      expect(recall).toHaveBeenCalledOnce();
+      expect(recall).toHaveBeenCalledWith(
+        expect.objectContaining({ turn: expect.objectContaining({ input: expectedInput }) }),
+      );
+      expect(
+        persistedSession?.history.some((message) => message.content === "Recalled context"),
+      ).toBe(true);
+      expect(persistedSession?.state?.["eve.memory"]).toBeDefined();
+    }
   });
 });
 

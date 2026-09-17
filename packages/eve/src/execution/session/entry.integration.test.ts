@@ -12,6 +12,7 @@ import { createChannelAddress } from "#channel/channel-address.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
+import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
@@ -218,6 +219,102 @@ function expectSingleTurn(events: readonly MessageStreamEvent[], turnId: string)
 }
 
 describe("workflowEntry integration", () => {
+  it("parks before initialization and initializes with the first message identity and title", async () => {
+    let initializedSessions = 0;
+    let initializedAuth: unknown;
+    let initializedInitiator: unknown;
+    const runtime = await createTestRuntime({
+      agent: { name: "workflow-entry-prewarm" },
+      modules: [
+        {
+          logicalPath: "hooks/initialize-session.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                async "session.started"(_event, ctx) {
+                  await ctx.getSandbox();
+                  initializedSessions += 1;
+                  initializedAuth = ctx.session.auth.current;
+                  initializedInitiator = ctx.session.auth.initiator;
+                },
+              },
+            }),
+          }),
+        },
+      ],
+    });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: {},
+          serializedContext: buildSerializedContext({
+            auth: { authenticator: "test", principalId: "mount", principalType: "user" },
+            channelKind: "http",
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        await waitForHook(
+          { runId: run.runId },
+          { token: sessionInboxHookToken(sessionCommandHookToken(run.runId)) },
+        );
+        await expectHookClaims(run.runId, [sessionCommandHookToken(run.runId)], {
+          turnStarted: false,
+        });
+
+        const sessionRuntime = createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        });
+        expect(await sessionRuntime.getStreamTailIndex(run.runId)).toBe(-1);
+        expect(initializedSessions).toBe(0);
+        for (const kind of ["clear", "compact", "cancel"] as const) {
+          await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), { kind });
+        }
+        const firstAuth = { authenticator: "test", principalId: "alice", principalType: "user" };
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          auth: firstAuth,
+          title: "Alice’s first chat",
+          kind: "send",
+          payload: { message: "Say hello to Alice." },
+          turnPolicy: "steer",
+        });
+
+        const firstTurn = await stream.nextTurn();
+        expect(filterEventsByType(firstTurn, "session.started")).toHaveLength(1);
+        expect(initializedSessions).toBe(1);
+        expect(initializedAuth).toEqual(firstAuth);
+        expect(initializedInitiator).toEqual(firstAuth);
+        expect((await (await getWorld()).runs.get(run.runId)).attributes?.["$eve.title"]).toBe(
+          "Alice’s first chat",
+        );
+        expectSingleTurn(firstTurn, "turn_0");
+        expect(firstTurn.at(-1)?.type).toBe("session.waiting");
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          auth: { ...firstAuth, principalId: "bob" },
+          title: "Do not rename",
+          kind: "send",
+          payload: { message: "Bob joins the conversation. Greet him briefly." },
+        });
+        const secondTurn = await stream.nextTurn();
+        expect(filterEventsByType(secondTurn, "session.started")).toHaveLength(0);
+        expectSingleTurn(secondTurn, "turn_1");
+        expect(initializedSessions).toBe(1);
+        expect((await (await getWorld()).runs.get(run.runId)).attributes?.["$eve.title"]).toBe(
+          "Alice’s first chat",
+        );
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  });
+
   it("persists model output before settlement when a stream append exceeds the SDK flush window", async () => {
     const runtime = await createTestRuntime({ agent: { name: "workflow-stream-order" } });
     const world = await getWorld();
@@ -732,6 +829,8 @@ describe("workflowEntry integration", () => {
           (event) => event.type === "session.waiting",
         );
 
+        await waitForParkedTurnStep(run.runId);
+
         // A cancel with no active turn is consumed by the parked wait
         // without producing a parent turn. The callback must still surface
         // in the continued wait instead of stalling until unrelated
@@ -1203,6 +1302,7 @@ describe("workflowEntry integration", () => {
 
   describe("deployment handoff", () => {
     const followUp = (acceptedDeploymentId: string, message: string, deliveryId: string) => ({
+      turnPolicy: "queue" as const,
       auth: null,
       delivery: {
         acceptedDeploymentId,
@@ -1241,6 +1341,7 @@ describe("workflowEntry integration", () => {
           let completed = false;
           try {
             expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+            await waitForParkedTurnStep(anchor.runId);
 
             const originalTimer =
               sessionTimeoutMs === false ? undefined : await readSessionTimer(anchor.runId);
@@ -1293,12 +1394,16 @@ describe("workflowEntry integration", () => {
               kind: "session-timeout",
               ownerRunId: anchor.runId,
             });
-            const anchorHooks = await world.hooks.list({ runId: anchor.runId });
-            expect(
-              anchorHooks.data
-                .map((hook) => hook.token)
-                .filter((token) => !token.startsWith("abrt_")),
-            ).toEqual([`${anchor.runId}:anchor`]);
+            // The successor can finish its turn before the old owner resumes
+            // from activation and disposes its temporary handoff hook.
+            await vi.waitFor(async () => {
+              const anchorHooks = await world.hooks.list({ runId: anchor.runId });
+              expect(
+                anchorHooks.data
+                  .map((hook) => hook.token)
+                  .filter((token) => !token.startsWith("abrt_")),
+              ).toEqual([`${anchor.runId}:anchor`]);
+            });
 
             // A third delivery through the stable session id reaches the successor
             // and still streams on the original run.
@@ -1320,6 +1425,7 @@ describe("workflowEntry integration", () => {
             if (successorTimer !== undefined) {
               expect(await readSessionTimer(successor.runId)).toEqual(successorTimer);
             }
+            await waitForParkedTurnStep(successor.runId, 2);
             await workflowRuntime.dispatchSession({
               command: followUp("dpl_c", "fourth message", "delivery-d"),
               sessionId: anchor.runId,
@@ -1572,6 +1678,7 @@ describe("workflowEntry integration", () => {
               await resumeHook(sessionInboxHookToken(sessionCommandHookToken(anchor.runId)), {
                 kind: "send",
                 payload: { message: `Alice sends input ${index} during release.` },
+                turnPolicy: "queue",
               });
             }
           }
@@ -1579,6 +1686,7 @@ describe("workflowEntry integration", () => {
         });
         try {
           expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+          await waitForParkedTurnStep(anchor.runId);
 
           await expect(
             workflowRuntime.dispatchSession({
@@ -2244,7 +2352,11 @@ async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
   }
 }
 
-async function expectHookClaims(runId: string, tokens: string[]): Promise<void> {
+async function expectHookClaims(
+  runId: string,
+  tokens: string[],
+  options: { readonly turnStarted?: boolean } = {},
+): Promise<void> {
   const events = await (
     await getWorld()
   ).events.list({
@@ -2255,8 +2367,8 @@ async function expectHookClaims(runId: string, tokens: string[]): Promise<void> 
   const claims = events.data.flatMap((event) =>
     event.eventType === "hook_created" ? [event.eventData.token] : [],
   );
-  const cancellation = claims.filter((token) => token.startsWith("abrt_"));
-  expect(cancellation).toHaveLength(1);
+  const signals = claims.filter((token) => token.startsWith("abrt_"));
+  expect(signals).toHaveLength(options.turnStarted === false ? 0 : 2);
   expect(claims.filter((token) => !token.startsWith("abrt_")).sort()).toEqual(
     tokens.map(sessionInboxHookToken).sort(),
   );

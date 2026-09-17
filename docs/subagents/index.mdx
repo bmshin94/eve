@@ -80,7 +80,7 @@ export default defineWorkspaceAgent({
 });
 ```
 
-The helper uses the peer's root `defineAgent({ description })` value as the model-visible tool description. Pass `description` to override it for this caller. When `transport` is omitted, eve selects the built-in transport for the runtime environment. Vercel deployments route through the current deployment and authenticate with the caller's Vercel OIDC token. A workspace hosted through `withEve()` in a Next.js app uses its `/eve/agents/<name>` mount; a hostless workspace uses `/<name>`. Outside Vercel, provide an explicit transport with `url` and optional `auth` or `headers`:
+The helper uses the peer's root `defineAgent({ description })` value as the model-visible tool description. Pass `description` to override it for this caller. When `transport` is omitted, eve selects the built-in transport for the Vercel runtime environment. Local `vercel dev` routes workspace calls without deployment credentials; Vercel deployments route calls through the current deployment and authenticate with the caller's Vercel OIDC token. Named peers use their `/eve/<name>` mount. Outside those environments, provide an explicit transport with `url` and optional `auth` or `headers`:
 
 ```ts title="agents/foreman/agent/subagents/research.ts"
 import { defineWorkspaceAgent } from "eve";
@@ -97,7 +97,7 @@ export default defineWorkspaceAgent({
 
 An explicit transport replaces the environment default completely. The receiving peer must still accept the transport's credentials through its channel authentication policy. Set `forwardPrincipal: true` only when the peer trusts the caller to forward user identity, as described in [Remote agents](./guides/remote-agents#forward-the-callers-identity).
 
-Use the peer's directory name under `agents/`. eve requires an exact workspace-member match, so add another declared subagent file for each additional peer. `eve dev` does not provide local workspace routing; configure an explicit transport to target a separately running peer.
+Use the peer's directory name under `agents/`. eve requires an exact workspace-member match, so add another declared subagent file for each additional peer. Run `vercel dev --local` with a root `vercel.ts` composed by `withEve` to start every member and enable the default local workspace transport. `eve dev` starts only the selected agent; use an explicit transport if it must call a separately running peer.
 
 ### Conditional availability
 
@@ -228,7 +228,7 @@ Subagent model calls automatically retry classified transient provider failures,
 
 A child parks after answering instead of terminating, keeping its session and conversation history alive. A failed child turn can also leave the child parked — its latest status shows the error and the parent may message it again. Pass a parked child's `agentId` to the same subagent tool with a new `message` to continue that session. Omitting `agentId` (or passing an empty string or `null`) always starts a new child, and an `agentId` that matches no known agent falls back to starting a new child rather than failing. Passing a known `agentId` through a different subagent tool fails with `AGENT_MISMATCH`.
 
-To steer a running background child, call the same subagent tool with its `agentId` and the updated `message`. The child finishes its current Workflow step, then applies the update before its next model call in the same turn. The receipt retains the same `agentId` and `taskId`; steering does not cancel the task, replace its completion callback, or undo tool side effects that have already occurred.
+To steer a running background child, call the same subagent tool with its `agentId` and the updated `message`. Before answer output or local tool execution begins, steering interrupts the child's pending model generation and applies the update in the same turn. Executing tools finish and checkpoint their results first; after answer output starts, steering waits for the next committed Workflow boundary. The receipt retains the same `agentId` and `taskId`; steering does not cancel the task, replace its completion callback, or undo tool side effects that have already occurred.
 
 A child that is still starting, or is owned by a blocking workflow invocation rather than an admitted background task, continues to return `AGENT_BUSY`. Delivery failures are reported to the caller; eve does not start a replacement child session to hide them.
 

@@ -3,16 +3,16 @@ title: "Overview"
 description: "Put an eve agent behind a browser chat UI with useEveAgent."
 ---
 
-The frontend helpers put a browser chat or agent UI on top of an eve agent. `useEveAgent()` opens a durable session, sends turns, streams the reply back, and turns the raw event stream into render-ready state. React is the reference implementation; [Vue](./use-eve-agent-vue) and [Svelte](./use-eve-agent-svelte) ship the same surface.
+Use this guide when you already have a browser application and need to connect it to an eve agent. `useEveAgent()` opens a durable session, sends turns, streams the reply back, and turns the raw event stream into render-ready state. React is the reference implementation; [Vue](./use-eve-agent-vue) and [Svelte](./use-eve-agent-svelte) ship the same surface.
 
 ## The integration model
 
 A browser UI is a client of the agent's HTTP routes (the [eve channel](../../channels/overview)). Two layers wire it up:
 
-- **The framework integration** mounts the eve routes on your app's origin, so the browser never crosses a CORS boundary or reads an env var to find the agent. Pick yours: [Next.js](./nextjs) (`withEve`), [Nuxt](./nuxt) (the `eve/nuxt` module), or [SvelteKit](./sveltekit) (the `eveSvelteKit` Vite plugin). On any other stack the hook talks to same-origin `/eve/v1/*` routes directly, or you pass an explicit `host`.
+- **Routing** makes the agent reachable from the browser. A framework integration can mount eve on your app's origin: [Next.js](./nextjs) (`withEve`), [Nuxt](./nuxt) (the `eve/nuxt` module), or [SvelteKit](./sveltekit) (the `eveSvelteKit` Vite plugin). If the frontend and agents are peer services, use your deployment platform or reverse proxy instead. The hook works with either setup; pass `host` for a different origin or a named path mount.
 - **The hook** (`useEveAgent`) holds the session state, streaming, errors, and composer status. It defaults to same-origin eve routes such as `/eve/v1/session`.
 
-The per-framework pages below walk through the wiring step by step: [Next.js](./nextjs), [Nuxt](./nuxt), and [SvelteKit](./sveltekit).
+The framework pages walk through the wiring step by step: [Next.js](./nextjs), [Nuxt](./nuxt), and [SvelteKit](./sveltekit). See [Project Structure](../../concepts/project-structure#configure-a-web-deployment) to choose between a framework integration and peer services.
 
 For scripts, server-to-server calls, evals, tests, or custom clients that do not need framework UI state, use the [Client SDK](../client/overview) directly.
 
@@ -74,9 +74,10 @@ export function Chat() {
 | --------- | ----------------------------------------------------------------------------------------- |
 | `data`    | Projected UI state from the reducer. Defaults to `{ messages }`.                          |
 | `status`  | `"ready"`, `"resuming"`, `"submitted"`, `"streaming"`, or `"error"`. Drives the composer. |
-| `error`   | The last `Error` thrown, if any.                                                          |
+| `error`   | The latest session creation, stream, resume, or turn failure.                             |
 | `events`  | Raw eve stream events for this session.                                                   |
 | `session` | Serializable fixed session cursor (`sessionId`, `streamIndex`).                           |
+| `prewarm` | Create the durable session without starting a turn.                                       |
 | `send`    | Send text or a multi-part message, with per-turn options.                                 |
 | `respond` | Answer pending HITL input requests, with per-turn options.                                |
 | `resume`  | Replay an attached session and follow its in-flight turn.                                 |
@@ -84,6 +85,50 @@ export function Chat() {
 | `reset`   | Clear local events, data, errors, and the local session cursor.                           |
 
 Most chat UIs only need `data.messages` and `status`. Drop down to `events` when you need the authoritative wire events directly, for example to persist an audit log or build a custom projection.
+
+Pass `prewarm: true` to start a workflow when the chat mounts and after each reset:
+
+```tsx
+import { useEveAgent } from "eve/react";
+
+export function Chat() {
+  const agent = useEveAgent({ prewarm: true });
+
+  return <button onClick={agent.reset}>New chat</button>;
+}
+```
+
+Prewarming defaults to `false`: the first send creates the session. Enable it when your
+application's auth, headers, and any chat-record binding are ready at mount. Applications
+that prepare those in the submit handler should keep the default.
+
+Prewarming starts the workflow and establishes its inbox, then parks before session hooks,
+dynamic definitions, or sandbox setup run. The first message passes through the channel's
+`onMessage` hook and supplies the identity and context for initialization and `turn_0`.
+
+The explicit `prewarm()` method resolves on `202 Accepted`, as does `client.sessions.create()`.
+It does not wait for an initialization event; concurrent calls share the same create request.
+The composer stays `"ready"`, meaning it can accept input, and prewarming does not run
+`prepareSend`. A concurrent `send()` waits only for acceptance, then posts the message.
+If the inbox is still starting, the client retries `409 session_not_ready` with bounded
+exponential backoff for up to 20 seconds. The caller's abort signal cancels the wait. Stream
+events are not a prerequisite for sending.
+
+A failed create sets `error` and calls `onError` when no send is waiting. A waiting send can
+fall back to creating a session with its message. After creation succeeds, initialization
+failures arrive on the stream during the first turn. The configured session timeout starts
+at creation, so an unused prewarmed session can expire before its first message.
+
+The hook keeps consuming one session stream across turns and idle periods. Replies,
+authorization updates, and turns started elsewhere all update the same projection. A turn settling
+does not close the connection. The transport reconnects from its cursor after a disconnect or the
+server's renewable 60-second lease; lease renewal does not start a turn or clear UI state.
+Unmounting or resetting closes the local stream without cancelling the old durable session.
+
+`reset()` reuses the hook instance and clears the conversation. With `prewarm: true`, it
+immediately prepares the next owned session; otherwise, the next send creates it. An explicitly supplied
+`session` remains externally owned and is never replaced by prewarming or reset. Use
+`initialSession` with `resume: true` to restore a saved chat.
 
 `data.messages` are eve-owned `EveMessage[]`. Common text, reasoning, file, and dynamic-tool parts follow the [AI SDK `UIMessage`](https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message) rendering convention, but the types are not interchangeable. eve also exposes authorization and HITL metadata, and a file part's URL can be absent. Adapt those parts before passing messages to an API typed as `UIMessage[]`.
 
@@ -107,7 +152,9 @@ await agent.send([
 ]);
 ```
 
-Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and a new turn moves `status` from `ready` to `submitted` to `streaming` and back. Resuming an attached session uses `resuming` while eve performs bounded catch-up. Disable message and HITL submission in that state. A settled tail moves directly to `ready`; an in-flight tail moves to `streaming` before eve follows it. To steer an active turn with a follow-up, send the message with `turnPolicy: "steer"`. eve applies the message at the next committed workflow boundary and keeps the hook attached through completion:
+Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and a new turn moves `status` from `ready` to `submitted` to `streaming` and back. Resuming an attached session uses `resuming` while eve performs bounded catch-up. Disable message and HITL submission in that state. A settled tail moves directly to `ready`; an in-flight tail moves to `streaming` before eve follows it.
+
+To steer an active turn with a follow-up, send the message with `turnPolicy: "steer"`. Before answer output or local tool execution begins, eve interrupts pending model generation and continues the same turn with the correction. Executing tools finish and checkpoint their results first; after answer output starts, steering waits for the next committed workflow boundary. Reasoning and search progress do not count as answer output. The hook stays attached through completion:
 
 ```tsx
 await agent.send(message, { turnPolicy: "steer" });
@@ -225,9 +272,9 @@ const agent = useEveAgent({
 The hook accepts these lifecycle callbacks:
 
 - `onEvent(event)`: fires for each eve stream event as it arrives.
-- `onError(error)`: fires with the last `Error` when a turn fails.
+- `onError(error)`: fires when session creation, streaming, resume, or a turn fails. A failed prewarm reports here when no send is waiting to retry creation.
 - `onFinish(snapshot)`: fires with the final `{ data, status, session, ... }` snapshot once a turn settles.
-- `onSessionChange(session)`: fires when the session cursor advances. Persist it to resume across reloads.
+- `onSessionChange(session)`: fires when a session is created, its cursor advances, or reset clears it. Persist the session state to resume across reloads.
 
 ```tsx
 const agent = useEveAgent({
@@ -304,9 +351,9 @@ then save a final snapshot in `onFinish`.
 
 `initialEvents` must be an ordered prefix of the same session's stream, but its endpoint does not have to line up exactly with where the stream resumes. When the event count matches `initialSession.streamIndex`, catch-up continues from that cursor. A partial or overlapping saved log falls back to index `0`. Every event carries a stable [`meta.id`](/docs/concepts/sessions-runs-and-streaming#the-event-envelope), and the store drops any event whose id it has already applied, so an overlapping replay renders once and `onEvent` only fires for events your UI has not seen.
 
-For multiple chat threads, keep one saved event log and session cursor per thread. `agent`, `host`, `reducer`, `session`, `initialEvents`, `initialSession`, `auth`, `headers`, `optimistic`, and `resume` are read when the hook creates its store, so remount the chat component when switching threads, for example with `key={chat.id}`.
+For multiple chat threads, keep one saved event log and session cursor per thread. `agent`, `host`, `reducer`, `session`, `initialEvents`, `initialSession`, `auth`, `headers`, `optimistic`, `prewarm`, and `resume` are read when the hook creates its store, so remount the chat component when switching threads, for example with `key={chat.id}`.
 
-Pass `resume: true` with `initialSession` to rebuild the projection from the durable stream after mount. While `status` is `"resuming"`, render hydrated `data` but disable message and HITL submission; do not present cancellation or active-turn progress controls. If catch-up finds an in-flight turn, `status` changes to `"streaming"` before the binding follows it to a boundary. A settled tail changes directly to `"ready"` after a bounded catch-up check, without waiting for the live stream idle timeout. If that check finds a newly started turn or pending authorization, eve keeps following it. A terminal session failure changes to `"error"`.
+Pass `resume: true` with `initialSession` to rebuild the projection from the durable stream after mount. While `status` is `"resuming"`, render hydrated `data` but disable message and HITL submission; do not present cancellation or active-turn progress controls. If catch-up finds an in-flight turn, `status` changes to `"streaming"` before the binding follows it to a boundary. The stream reports its initial durable tail so catch-up can finish without closing the connection or waiting for an idle timeout. A settled tail changes directly to `"ready"`; a newer turn or pending authorization remains `"streaming"`. The connection stays open to receive later events. A terminal session failure changes to `"error"`.
 
 ```tsx
 const agent = useEveAgent({
@@ -329,6 +376,10 @@ const agent = useEveAgent({
   },
 });
 ```
+
+Headers supplied to `send()` apply to that turn request and become the credentials used by the
+continuous session stream on its next reconnect. A later send replaces them with that turn's
+headers.
 
 When a framework integration mounts multiple named agents, pass `agent` instead of `host`:
 

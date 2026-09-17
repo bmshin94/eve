@@ -9,6 +9,7 @@ import {
 } from "#harness/workflow-invocations.js";
 import { parseActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { HarnessSession } from "#harness/types.js";
+import type { AgentHandle, AgentHandlePhase } from "#subagents/handles/store.js";
 
 const metadata = { kind: "tool", name: "research" };
 const activity = {
@@ -63,6 +64,41 @@ function session(state: Record<string, unknown>): HarnessSession {
   };
 }
 const restored = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+
+const identity = { id: "ag_researcher:operation", name: "researcher", nodeId: "agent" };
+const address = {
+  continuationToken: "subagent:parent:call",
+  kind: "agent/local" as const,
+  sessionId: "child-session",
+};
+const startOperation = {
+  callId: "call",
+  id: "operation",
+  kind: "start" as const,
+  parentTurnId: "turn",
+};
+
+function handle(phase: AgentHandlePhase): AgentHandle {
+  switch (phase) {
+    case "starting":
+      return {
+        identity,
+        operation: startOperation,
+        phase,
+        target: { continuationToken: address.continuationToken, kind: "agent/local" },
+      };
+    case "running":
+      return { address, identity, operation: startOperation, phase };
+    case "parked":
+      return { address, identity, lastStatus: "Research complete", phase };
+    case "reserved":
+      return { identity, operationId: "operation", ownerId: "task", phase };
+    case "claimed":
+      return { address, identity, operationId: "operation", ownerId: "task", phase };
+    case "available":
+      return { address, identity, phase };
+  }
+}
 
 describe("additive durable state", () => {
   it("preserves task extensions through parsing, replayed creation and terminal updates", () => {
@@ -148,6 +184,37 @@ describe("handoff state inspection", () => {
         }),
       ),
     ).toBe(true);
+  });
+  it.each(["parked", "available"] as const)(
+    "allows an idle %s agent handle to cross a handoff",
+    (phase) => {
+      expect(
+        isSessionStateIdleForHandoff(
+          checkpoint({ "eve.agent.handles": { handles: [handle(phase)] } }),
+        ),
+      ).toBe(true);
+    },
+  );
+  it.each(["starting", "running", "reserved", "claimed"] as const)(
+    "refuses an active %s agent handle",
+    (phase) => {
+      expect(
+        isSessionStateIdleForHandoff(
+          checkpoint({ "eve.agent.handles": { handles: [handle(phase)] } }),
+        ),
+      ).toBe(false);
+    },
+  );
+  it("parses idle handles before accepting them", () => {
+    expect(() =>
+      isSessionStateIdleForHandoff(
+        checkpoint({
+          "eve.agent.handles": {
+            handles: [{ ...handle("parked"), address: { ...address, sessionId: "" } }],
+          },
+        }),
+      ),
+    ).toThrow("Corrupt agent handle store");
   });
   it("parses settled entries before checking their terminal status", () => {
     const incompatible = { ...task, address: { ...task.address, hookToken: 42 } };

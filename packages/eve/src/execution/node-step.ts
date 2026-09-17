@@ -53,6 +53,7 @@ export type CreateRuntime = (config: {
  * Input for building a harness step for one resolved runtime node.
  */
 export interface CreateExecutionNodeStepInput {
+  readonly steeringSignal?: AbortSignal;
   /** Cancellation signal forwarded to the tool-loop harness. */
   readonly abortSignal?: AbortSignal;
   /**
@@ -92,11 +93,13 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
       : createRuntimeDynamicModelEventDispatcher(
           input.modelResolutionScope,
           input.node.turnAgent.dynamicModel,
+          input.abortSignal,
         );
   const tools = createNodeHarnessTools({ node: input.node });
   const instrumentation = input.instrumentation;
   const sessionInstrumentation = instrumentation?.prepareExecution();
   const step = createToolLoopHarness({
+    steeringSignal: input.steeringSignal,
     abortSignal: input.abortSignal,
     capabilities: input.capabilities,
     clearOnly: input.clearOnly,
@@ -167,9 +170,11 @@ function createRuntimeModelResolver(
 function createRuntimeDynamicModelEventDispatcher(
   scope: RuntimeModelResolutionScope,
   dynamicModel: NonNullable<ResolvedRuntimeAgentNode["turnAgent"]["dynamicModel"]>,
+  abortSignal: AbortSignal | undefined,
 ): NonNullable<Parameters<typeof createToolLoopHarness>[0]["dispatchDynamicModelEvent"]> {
   return (input) =>
     dispatchDynamicModelEvent({
+      abortSignal,
       ctx: input.ctx,
       dynamicModel,
       event: input.event,

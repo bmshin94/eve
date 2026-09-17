@@ -4,6 +4,20 @@ import { stampTestEvents } from "#internal/testing/events.js";
 import { createMessageReceivedEvent, createSessionWaitingEvent } from "#protocol/message.js";
 
 describe("SteeringStream", () => {
+  it("submits steering immediately without cancelling or waiting for the active stream", async () => {
+    const admitted = Promise.withResolvers<AsyncIterable<never>>();
+    const session = { cancel: vi.fn(), send: vi.fn(() => admitted.promise) };
+    const stream = new SteeringStream(iterate([]), session);
+    const sending = stream.send("Actually 2025");
+    expect(session.send).toHaveBeenCalledWith("Actually 2025", {
+      turnPolicy: "steer",
+      signal: expect.any(AbortSignal),
+    });
+    expect(session.cancel).not.toHaveBeenCalled();
+    admitted.resolve(iterate([]));
+    await sending;
+    stream.abort();
+  });
   it("deduplicates a steering response on the same turn and emits its boundary once", async () => {
     const events = stampTestEvents([
       createMessageReceivedEvent({ message: "first", sequence: 0, turnId: "turn_0" }),

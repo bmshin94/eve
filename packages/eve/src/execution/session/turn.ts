@@ -5,7 +5,7 @@ import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-st
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
-import type { SessionInputQueue } from "#execution/session/input-queue.js";
+import { isSteeringDelivery, type SessionInputQueue } from "#execution/session/input-queue.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
@@ -30,6 +30,7 @@ import { turnStep } from "#execution/session/turn-step.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
+import { decodeSessionInboxPayload } from "#execution/session-inbox/protocol.js";
 import {
   isInboxSubagentResultFromRecordedWorkflowToolRun,
   isInboxToolResultFromRecordedWorkflowToolRun,
@@ -85,11 +86,15 @@ export class SessionExecution {
       const { cursor } = this.input;
       const beforeStepContext = cursor.serializedContext;
       const result: DurableStepResult = await turnStep(
-        cursor.createStepInput(nextStepInput, turn.signal),
+        cursor.createStepInput(nextStepInput, {
+          abortSignal: turn.signal,
+          steeringSignal: turn.steeringSignal,
+        }),
       );
       const pendingCallIds =
         result.action === "park" ? result.pendingCoordinationCallIds : undefined;
       const hasBackgroundTasks = (result.backgroundTasks?.length ?? 0) > 0;
+      const settled = result.action === "park" && result.settled !== undefined;
 
       if (hasBackgroundTasks) {
         if (result.backgroundTaskState === undefined) {
@@ -105,14 +110,15 @@ export class SessionExecution {
       await cursor.apply({
         serializedContext: result.serializedContext,
         sessionState:
-          result.action === "cancelled" || turn.signal.aborted
+          result.action === "cancelled" || (!settled && turn.signal.aborted)
             ? (result.backgroundTaskState ?? result.sessionState)
             : result.sessionState,
       });
       await turn.admitBoundary();
+      turn.resetSteering();
 
       if (result.action === "cancelled") return await this.finishCancelledTurn();
-      if (turn.signal.aborted && (pendingCallIds === undefined || hasBackgroundTasks)) {
+      if (!settled && turn.signal.aborted && (pendingCallIds === undefined || hasBackgroundTasks)) {
         return await this.finishCancelledTurn();
       }
 
@@ -260,9 +266,9 @@ type RuntimeEvent =
  * the turn reaches a committed boundary; a runtime-action wait routes them
  * eagerly so a proxied child can receive the answer it is blocked on.
  *
- * Cancellation is pushed by the inbox pump the moment it is accepted so the
- * running step aborts immediately; its durable side effects are applied when
- * the queued command is admitted at the next boundary.
+ * The pump signals cancellation and eligible steering immediately. Cancellation
+ * aborts the turn; steering only interrupts generation before assistant output
+ * or local tool execution. Both retain ordered admission at the next boundary.
  */
 class ActiveTurn {
   private readonly admitted = new Set<number>();
@@ -273,6 +279,8 @@ class ActiveTurn {
   private readonly input: SessionExecutionInput;
   private readonly callerCallId: string | undefined;
   private readonly unsubscribe: () => void;
+  private unsubscribeDelivery: () => void;
+  private steeringController = new AbortController();
 
   constructor(input: SessionExecutionInput, callerCallId: string | undefined) {
     this.input = input;
@@ -281,7 +289,29 @@ class ActiveTurn {
     this.unsubscribe = input.inbox.onInterrupt((payload) => {
       if (this.cancelsThisTurn(payload)) this.abort();
     });
+    this.unsubscribeDelivery = input.inbox.onDelivery(this.signalSteering);
   }
+
+  private readonly signalSteering = (payload: SessionInboxPayload): void => {
+    let delivery;
+    try {
+      delivery = decodeSessionInboxPayload(payload);
+    } catch {
+      return;
+    }
+    if (
+      delivery.kind === "deliver" &&
+      isSteeringDelivery(delivery, this.callerCallId) &&
+      !this.input.cursor.sessionState.hasProxyInputRequests &&
+      delivery.payloads.some(
+        (value) =>
+          value.message !== undefined &&
+          value.inputResponses === undefined &&
+          value.task === undefined,
+      )
+    )
+      this.steeringController.abort();
+  };
 
   get signal(): AbortSignal {
     return this.controller.signal;
@@ -289,6 +319,20 @@ class ActiveTurn {
 
   dispose(): void {
     this.unsubscribe();
+    this.unsubscribeDelivery();
+  }
+
+  get steeringSignal(): AbortSignal {
+    return this.steeringController.signal;
+  }
+
+  resetSteering(): void {
+    if (!this.steeringController.signal.aborted) return;
+    this.unsubscribeDelivery();
+    this.steeringController = new AbortController();
+    // Admission can yield while new deliveries are pumped. Replaying the
+    // unread inbox keeps those arrivals attached to the next generation.
+    this.unsubscribeDelivery = this.input.inbox.onDelivery(this.signalSteering);
   }
 
   /** Admits everything the pump accepted while the last step ran. */

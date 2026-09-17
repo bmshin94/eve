@@ -28,24 +28,22 @@ A config that selects a static Gateway model is compile-only. A config that cont
 
 `model` accepts a gateway model id string, which routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To call a provider directly and configure the model in code, pass a provider-authored `LanguageModel`.
 
-Provider-specific AI SDK packages are regular project dependencies. A fresh `eve init` app includes the core `ai` package, but it does not install every provider package. Install the provider package you import, then set that provider's API key:
-
-```bash
-npm install @ai-sdk/anthropic
-```
+Use eve's helpers for direct OpenAI or Anthropic access without installing another provider package:
 
 ```ts title="agent/agent.ts"
-import { anthropic } from "@ai-sdk/anthropic";
 import { defineAgent } from "eve";
+import { anthropic } from "eve/models/anthropic";
 
 export default defineAgent({
-  model: anthropic("claude-opus-4-8"),
+  model: anthropic(), // claude-sonnet-5
 });
 ```
 
-Direct provider model ids use the provider's native format. For Anthropic, the
-version uses hyphens (`claude-opus-4-8`), while the Gateway id above uses a dot
-(`anthropic/claude-opus-4.8`).
+`openai()` from `eve/models/openai` defaults to `gpt-5.6-luna-fast`. Both helpers accept an optional native provider model ID and use `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. During local development they can also use credentials saved through `/login`. Deployments require their API key in the server environment.
+
+For a local ChatGPT subscription, use `chatgpt()` from `eve/models/openai` and sign in with `/login`. It defaults to `gpt-5.6-luna-fast` and cannot run in a deployment.
+
+`/login` can switch a static Gateway string to an eve helper and manage its import. `/model` changes the selected model and settings immediately. Custom provider SDK calls and dynamic expressions retain their authored behavior and require manual source edits. You can still install an AI SDK provider package and pass its `LanguageModel` when you need provider-specific configuration.
 
 Model use is subject to the terms, data-processing commitments, retention behavior, and available controls of the selected provider and routing path. Review the [AI Gateway model catalog](https://vercel.com/ai-gateway/models) for gateway-routed models, and review the provider's terms when you configure a direct `LanguageModel`.
 
@@ -63,6 +61,9 @@ at either provider path takes precedence and is forwarded unchanged. When
 to compaction calls.
 
 ### Choose the model dynamically
+
+To select a model from the incoming prompt with an AI SDK evaluation model, use
+[`autoModel` from `eve/experimental/evaluate`](./guides/evaluate).
 
 `model` also accepts `defineDynamic({ events })`. Each matching handler must
 return the concrete model for its scope; a dynamic model has no compiled
@@ -101,7 +102,7 @@ fails the turn.
   model without valid credentials fails at request time.
 - **Serialization.** Session/turn selections must be model id strings; return
   live `LanguageModel` objects only from `step.started`.
-- **Selection object.** `{ model, modelContextWindowTokens?, modelOptions? }`.
+- **Selection object.** `{ model, reasoning?, modelContextWindowTokens?, modelOptions? }`.
   When `modelContextWindowTokens` is omitted, eve resolves it from the AI
   Gateway catalog and caches successful metadata in durable session state for
   24 hours. Set it explicitly for an unlisted or custom model. Dynamic agents
@@ -128,6 +129,10 @@ Supported values are `"provider-default"`, `"none"`, `"minimal"`, `"low"`,
 `"medium"`, `"high"`, and `"xhigh"`. The selected model and provider determine
 which levels are available and how they map to provider-native settings. Use
 `modelOptions.providerOptions` when you need provider-specific reasoning controls.
+A dynamic model selection can return `reasoning` alongside `model` to override
+the agent-level setting for that selection. Omitting it inherits the agent setting;
+`"provider-default"` explicitly uses the provider's default.
+
 Run `eve set --reasoning high` to update this field from the command line.
 
 ## Compaction
@@ -277,9 +282,10 @@ events, and side effects. Use stable idempotency keys for non-idempotent tools.
 
 eve ends a batch before it waits for input, authorization, or blocking
 coordination, and before it acknowledges a background task. A batch can also
-end below the configured ceiling when the turn completes. Steering waits for the
-batch to commit, then applies accepted input within the same turn. Larger batches
-increase the interval between steering boundaries. This option is experimental and may change or
+end below the configured ceiling when the turn completes or steering arrives.
+Before assistant output begins, steering can interrupt pending model generation.
+Executing tools finish safely before the batch yields and applies the correction.
+This option is experimental and may change or
 disappear in any release. See [Execution model and
 durability](./concepts/execution-model-and-durability#resuming-after-a-crash)
 for the retry behavior.

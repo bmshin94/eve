@@ -4,24 +4,24 @@ import {
   defineDynamic,
   type AgentReasoningDefinition,
   type AgentStaticModelDefinition,
+  type DynamicSentinel,
+  type DynamicSubagentDefinition,
 } from "#public/index.js";
+
+import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 
 import { resolveSelfModificationConfig, type SelfModificationConfig } from "./config.js";
 import { hasGitHubCredential } from "./credentials.js";
 import { resolveSelfModificationMode } from "./mode.js";
 
-/** Default model used by the self-modification subagent. */
-export const DEFAULT_SELF_MODIFICATION_MODEL = "anthropic/claude-sonnet-5";
+/** Fallback model when neither the self-modification agent nor its parent configures one. */
+export const FALLBACK_SELF_MODIFICATION_MODEL = DEFAULT_AGENT_MODEL_ID;
 
 /** Configuration for the self-modification subagent. */
 export interface SelfModificationAgentOptions {
   /** Policy shared with the sandbox and extension mount. */
   readonly config?: SelfModificationConfig;
-  /**
-   * Model used by the self-modification subagent.
-   *
-   * @default "anthropic/claude-sonnet-5"
-   */
+  /** Model used by the self-modification subagent; defaults to the effective parent model. */
   readonly model?: AgentStaticModelDefinition;
   /**
    * Reasoning effort used by the self-modification subagent.
@@ -50,6 +50,10 @@ const followUpDelegation =
   "Resolve short follow-ups such as “yes” or “do it” against the preceding conversation. " +
   "If whether the requested change should persist is genuinely ambiguous, ask one concise clarifying question.";
 
+const repairDelegation =
+  "If a tool or capability created or changed by this subagent later fails or behaves incorrectly, explain the observed problem and offer to delegate a repair. " +
+  "Do not start the repair until the user confirms. Treat that confirmation as a source-modification request and delegate it immediately, including the exact identifier, failing behavior, expected behavior, and existing constraints.";
+
 const localIntegrationDelegation =
   "Delegate questions about which integrations, channels, connections, or capabilities are available to add: the subagent searches the eve registry and reports exact item addresses instead of guessing them.";
 
@@ -65,13 +69,15 @@ const deployedEffectiveEdits =
   "Source edits do not affect the caller’s current turn. The subagent can publish only a draft pull request, and changes become effective only after review, merge, and redeployment.";
 
 /** Defines the environment-aware self-modification dynamic subagent. */
-export function defineSelfModificationAgent(options: SelfModificationAgentOptions = {}) {
-  const model = options.model ?? DEFAULT_SELF_MODIFICATION_MODEL;
+export function defineSelfModificationAgent(
+  options: SelfModificationAgentOptions = {},
+): DynamicSentinel<DynamicSubagentDefinition | null> {
   const reasoning = options.reasoning;
   const config = resolveSelfModificationConfig(options.config);
 
   const resolve = async (_event: unknown, ctx: DynamicResolveContext) => {
     const mode = resolveSelfModificationMode(config);
+    const model = options.model ?? ctx.model?.id ?? FALLBACK_SELF_MODIFICATION_MODEL;
     const description = renderDescription([
       "Delegate here when the user asks to change this eve agent or its authored source.",
       sourceDelegation,
@@ -80,6 +86,7 @@ export function defineSelfModificationAgent(options: SelfModificationAgentOption
       mode === "local" ? localIntegrationDelegation : deployedIntegrationDelegation,
       mode === "local" ? localTraceDelegation : "",
       followUpDelegation,
+      repairDelegation,
       mode === "local" ? localEffectiveEdits : deployedEffectiveEdits,
     ]);
     if (mode === "local") return defineAgent({ description, model, reasoning });

@@ -40,7 +40,10 @@ export function isSessionStateIdleForHandoff(sessionState: DurableSessionState):
   )
     return false;
   return (
-    (handles?.handles.length ?? 0) === 0 &&
+    (handles === undefined ||
+      handles.handles.every(
+        (handle) => handle.phase === "parked" || handle.phase === "available",
+      )) &&
     invocations.every(
       (entry) => entry.lifetime === "session" && entry.task.terminalView !== undefined,
     )

@@ -1,3 +1,5 @@
+import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
+import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import { contextStorage } from "#context/container.js";
 import {
@@ -5,12 +7,16 @@ import {
   prepareDynamicInstructionPreamble,
 } from "#context/dynamic-instruction-lifecycle.js";
 import { refreshDynamicSessionSubagentsForRuntimeRevision } from "#context/dynamic-subagent-lifecycle.js";
+import { drainMemoryCommit, prepareMemoryPreamble } from "#context/memory-lifecycle.js";
 import {
   rebindMissingCompiledDynamicToolCallbacks,
   refreshDynamicSessionToolsForRuntimeRevision,
 } from "#context/dynamic-tool-lifecycle.js";
 import {
   AuthKey,
+  InitiatorAuthKey,
+  SessionTitleKey,
+  ParentSessionKey,
   CapabilitiesKey,
   ChannelDeliveryKey,
   HandleEventKey,
@@ -36,7 +42,13 @@ import { matchAuthorizationCallbacks } from "#execution/authorization-callback-m
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
-import { coalesceTurnInputs, type UserModelMessage } from "#harness/messages.js";
+import {
+  coalesceTurnInputs,
+  createTurnInputMessages,
+  validateHarnessModelMessages,
+  type UserModelMessage,
+} from "#harness/messages.js";
+import { consumeDeferredStepInput } from "#harness/pending-input-batches.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import type { DurableStepResult, TurnStepInput } from "#execution/session/turn-step-types.js";
 import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
@@ -105,9 +117,6 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
 
   let durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
-  if (rawDelivery !== undefined) {
-    ctx.set(TurnTaskDeliveryKey, "none");
-  }
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
@@ -149,10 +158,13 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     }
   }
 
+  const previousAuth = ctx.get(AuthKey);
+
   // Apply deliver-time auth ferried via `resumeHook` (initial-turn
   // input has no auth; it was seeded by buildRunContext).
   if (delivery?.auth !== undefined) {
     ctx.set(AuthKey, delivery.auth ?? null);
+    if (!ctx.has(InitiatorAuthKey)) ctx.set(InitiatorAuthKey, delivery.auth ?? null);
   }
   const backgroundTaskDelivery = getBackgroundTaskDelivery(delivery);
   const initialSession = hydrateDurableSession({
@@ -170,17 +182,17 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     sessionId: initialSession.sessionId,
   });
   const initialEmissionState = getHarnessEmissionState(initialSession.state);
-
-  if (rawDelivery?.payloads.some((payload) => payload.message !== undefined)) {
-    const ids = rawDelivery.deliveryMetadata?.map((entry) => entry.deliveryId) ?? [];
-    ctx.set(
-      TurnDeliveryIdsKey,
-      initialEmissionState.turnId
-        ? [...new Set([...(ctx.get(TurnDeliveryIdsKey) ?? []), ...ids])]
-        : ids,
-    );
-  } else if (!initialEmissionState.sessionStarted && ctx.get(ChannelDeliveryKey) !== undefined) {
-    ctx.set(TurnDeliveryIdsKey, [ctx.require(ChannelDeliveryKey).deliveryId]);
+  if (
+    !initialEmissionState.sessionStarted &&
+    !ctx.has(SessionTitleKey) &&
+    !ctx.has(ParentSessionKey)
+  ) {
+    const message = rawDelivery?.payloads.find((payload) => payload.message !== undefined)?.message;
+    const title = deriveSessionTitle(rawDelivery?.title ?? message);
+    if (title !== undefined) {
+      ctx.set(SessionTitleKey, title);
+      await setEveAttributes({ "$eve.title": title });
+    }
   }
 
   if (rawDelivery !== undefined) {
@@ -222,6 +234,10 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
   });
   const { adapterCtx, dynamicConnections, effectiveNode, handleEvent } = sink;
   try {
+    const previousAdapterState =
+      delivery !== undefined && !isHarnessBetweenTurns(initialSession)
+        ? structuredClone(adapterCtx.state)
+        : undefined;
     // Run the adapter's deliver hook for each queued payload and coalesce
     // the resulting StepInput values; runtime results ride the same input.
     let resolved: StepInput | undefined;
@@ -245,6 +261,32 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       }
       resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
     }
+    const ignoredActiveDelivery =
+      delivery !== undefined && resolved === undefined && !isHarnessBetweenTurns(initialSession);
+    if (ignoredActiveDelivery) {
+      // The adapter sees the incoming caller, but an ignored correction must
+      // not change the identity or reply destination of the interrupted work.
+      if (previousAuth === undefined) ctx.delete(AuthKey);
+      else ctx.set(AuthKey, previousAuth);
+      adapterCtx.state = previousAdapterState!;
+    } else {
+      if (rawDelivery !== undefined) ctx.set(TurnTaskDeliveryKey, "none");
+      if (rawDelivery?.payloads.some((payload) => payload.message !== undefined)) {
+        const ids = rawDelivery.deliveryMetadata?.map((entry) => entry.deliveryId) ?? [];
+        ctx.set(
+          TurnDeliveryIdsKey,
+          initialEmissionState.turnId
+            ? [...new Set([...(ctx.get(TurnDeliveryIdsKey) ?? []), ...ids])]
+            : ids,
+        );
+      } else if (
+        !initialEmissionState.sessionStarted &&
+        ctx.get(ChannelDeliveryKey) !== undefined
+      ) {
+        ctx.set(TurnDeliveryIdsKey, [ctx.require(ChannelDeliveryKey).deliveryId]);
+      }
+    }
+
     if (runtimeResults !== undefined) {
       if (runtimeResults.acceptedAtMsByCallId !== undefined) {
         ctx.set(RuntimeActionSettlementTimesKey, runtimeResults.acceptedAtMsByCallId);
@@ -271,7 +313,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     activityCohort.updateActivityRootForDelivery({
       activeTurnId: activeTurnId(initialEmissionState),
       ctx,
-      delivery: rawDelivery,
+      delivery: ignoredActiveDelivery ? undefined : rawDelivery,
       sessionState: durableSession.state,
       taskRootTurnId,
     });
@@ -292,7 +334,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       setChannelContext(ctx, updatedAdapter);
     }
 
-    if (delivery !== undefined && resolved === undefined) {
+    if (delivery !== undefined && resolved === undefined && isHarnessBetweenTurns(initialSession)) {
       await contextStorage.run(ctx, () =>
         instrumentation?.instrumentChannelDelivery({
           ctx,
@@ -382,6 +424,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       const modelSession = refreshedSession;
 
       const step = createExecutionNodeStep({
+        steeringSignal: input.steeringSignal,
         abortSignal: input.abortSignal,
         capabilities,
         clearOnly: input.input?.control === "clear",
@@ -409,6 +452,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       // or the pending batch would re-park and later re-dispatch.
       throwIfTurnAborted(input.abortSignal);
       stepResult = await runModelCallBatch({
+        steeringSignal: input.steeringSignal,
         initialInput: resolved,
         initialSession,
         modelCallsPerStep,
@@ -432,7 +476,16 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
             if (firstCall && completedAuths) {
               let emissionState = getHarnessEmissionState(schemaSession.state);
               if (isHarnessBetweenTurns(schemaSession)) {
+                const turnInput = createTurnInputMessages(
+                  consumeDeferredStepInput({ session: schemaSession, input: stepInput }).input,
+                );
                 prepareDynamicInstructionPreamble(ctx, history.messages(schemaSession));
+                prepareMemoryPreamble(ctx, {
+                  history: schemaSession.history,
+                  input: turnInput,
+                  projector: history.projector,
+                  state: schemaSession.state,
+                });
                 let instructionMessages: readonly UserModelMessage[] = [];
                 const traceContext = await prepareWorkflowPreambleTrace({
                   emissionState,
@@ -443,14 +496,23 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
                     handleEvent,
                     {},
                     emissionState,
+                    history.projector({
+                      messages: [...schemaSession.history, ...turnInput],
+                      state: schemaSession.state,
+                    }),
                     runtimeIdentity,
                     traceContext,
                   );
                 } finally {
                   instructionMessages = drainDynamicInstructionUserMessages(ctx);
+                  const memoryCommit = drainMemoryCommit(ctx);
                   schemaSession = {
                     ...schemaSession,
-                    history: [...schemaSession.history, ...instructionMessages],
+                    history: validateHarnessModelMessages([
+                      ...(memoryCommit?.history ?? schemaSession.history),
+                      ...instructionMessages,
+                    ]),
+                    state: memoryCommit?.state ?? schemaSession.state,
                   };
                 }
                 schemaSession = setHarnessEmissionState(schemaSession, emissionState);
@@ -476,7 +538,9 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
 
             return runHarnessStep(schemaSession, stepInput);
           });
-          throwIfTurnAborted(input.abortSignal);
+          // The waiting boundary may reach the client before this step returns.
+          // Its settled result wins over a cancellation of that completed turn.
+          if (result.settledTurn === undefined) throwIfTurnAborted(input.abortSignal);
           completedModelCall = { result, serializedContext: serializeContext(ctx) };
           return result;
         },

@@ -8,6 +8,7 @@ export default defineEval({
     "A background workflow streams progress and delivers one terminal report to the parent.",
   async test(t) {
     const started = await t.send("BACKGROUND-EXPORT-START");
+    const conversation = started.session;
     started.expectOk();
     started.calledTool("export");
 
@@ -15,11 +16,11 @@ export default defineEval({
     const taskId = readTaskId(receipt.output);
     if (taskId === undefined) throw new Error("export receipt is missing taskId.");
 
-    const sessionId = t.sessionId;
+    const sessionId = conversation.sessionId;
     if (sessionId === undefined) throw new Error("Eval has no parent session id.");
 
     const doneLive = t.target.watchTurn(sessionId, {
-      startIndex: requireStreamIndex(t, "completion wait"),
+      startIndex: requireStreamIndex(started.session, "completion wait"),
     });
     const doneTurn = await doneLive.result();
     doneTurn.expectOk();

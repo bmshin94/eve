@@ -6,6 +6,7 @@ export default defineEval({
     "A background workflow tool returns a receipt, reports progress, and wakes the agent with its result.",
   async test(t) {
     const started = await t.send("WORKFLOW-REPORT-START");
+    const conversation = started.session;
     started.expectOk();
     started.calledTool("report_deploy");
 
@@ -13,11 +14,11 @@ export default defineEval({
     const taskId = readTaskId(receipt.output);
     if (taskId === undefined) throw new Error("report_deploy receipt is missing taskId.");
 
-    const sessionId = t.sessionId;
+    const sessionId = conversation.sessionId;
     if (sessionId === undefined) throw new Error("Eval has no parent session id.");
 
     const doneLive = t.target.watchTurn(sessionId, {
-      startIndex: requireStreamIndex(t, "completion wait"),
+      startIndex: requireStreamIndex(started.session, "completion wait"),
     });
     const doneTurn = await doneLive.result();
     doneTurn.expectOk();
