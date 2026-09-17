@@ -520,7 +520,7 @@ describe("buffered task completion batching", () => {
 
   it("individual wakes for a completion while its cross-turn sibling remains unfinished", async () => {
     const input = batchingInput(2, true);
-    await input.cursor.apply({ serializedContext: { "eve.taskWakePolicy": "individual" } });
+    await input.cursor.apply({ serializedContext: { "eve.runtime.taskWakePolicy": "individual" } });
     const first = completion("task_0");
     input.queue.enqueueDelivery(first);
     await expect(nextTurnDelivery(input)).resolves.toMatchObject({ kind: "turn", delivery: first });
@@ -529,7 +529,7 @@ describe("buffered task completion batching", () => {
 
   it("individual combines ready siblings without waiting for the remaining task", async () => {
     const input = batchingInput(3);
-    await input.cursor.apply({ serializedContext: { "eve.taskWakePolicy": "individual" } });
+    await input.cursor.apply({ serializedContext: { "eve.runtime.taskWakePolicy": "individual" } });
     const first = completion("task_0");
     const second = completion("task_1");
     input.queue.enqueueDelivery(first);
@@ -549,7 +549,7 @@ describe("buffered task completion batching", () => {
 
   it("individual preserves intervening user input and deferred delivery boundaries", async () => {
     const input = batchingInput(3);
-    await input.cursor.apply({ serializedContext: { "eve.taskWakePolicy": "individual" } });
+    await input.cursor.apply({ serializedContext: { "eve.runtime.taskWakePolicy": "individual" } });
     const question = {
       kind: "deliver",
       payloads: [{ message: "Alice checks the status." }],

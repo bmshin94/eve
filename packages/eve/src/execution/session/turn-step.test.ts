@@ -2599,7 +2599,7 @@ describe("turnStep", () => {
         serializedContext,
         sessionState: createStubSessionState(),
       });
-      expect(result.serializedContext["eve.taskWakePolicy"]).toBe(expected);
+      expect(result.serializedContext["eve.runtime.taskWakePolicy"]).toBe(expected);
       expect(phases).toEqual([expected === "individual" ? "settled" : "pending"]);
     },
   );

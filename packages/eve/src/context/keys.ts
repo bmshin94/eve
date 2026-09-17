@@ -102,7 +102,7 @@ export const ChannelDeliveryKey = new ContextKey<ChannelDeliveryMetadata>("eve.c
 /** Accepted messages whose response owns the current turn's durable stream events. */
 export const TurnDeliveryIdsKey = new ContextKey<readonly string[]>("eve.turnDeliveryIds");
 /** Channel wake policy resolved by the last committed step, also read by the workflow inbox. */
-export const TaskWakePolicyKey = new ContextKey<TaskWakePolicy>("eve.taskWakePolicy");
+export const TaskWakePolicyKey = new ContextKey<TaskWakePolicy>("eve.runtime.taskWakePolicy");
 /** Task-reporting phase for the active root turn. */
 export const TurnTaskDeliveryKey = new ContextKey<"none" | "initiating" | "pending" | "settled">(
   "eve.turnTaskDelivery",
