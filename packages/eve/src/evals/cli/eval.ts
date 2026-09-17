@@ -134,12 +134,11 @@ export async function runEvalCommand(
   let target: EveEvalTargetHandle;
   let client: Awaited<ReturnType<typeof createEvalClient>>;
   let setupResult: EveEvalSetupResult | void;
-  let restoreEnvironment: (() => void) | undefined;
 
   try {
     setupResult = await config.setup?.();
     if (setupResult?.env) {
-      restoreEnvironment = overrideDevelopmentEnvironment(appRoot, setupResult.env);
+      overrideDevelopmentEnvironment(appRoot, setupResult.env);
     }
 
     if (options.url) {
@@ -217,7 +216,6 @@ export async function runEvalCommand(
         process.exitCode = 1;
       }
     }
-    restoreEnvironment?.();
   }
 
   const exitCode = typeof process.exitCode === "number" ? process.exitCode : 0;

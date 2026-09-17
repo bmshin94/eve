@@ -24,7 +24,7 @@ function isMissingEnvironmentFileError(error: unknown): error is NodeJS.ErrnoExc
 interface DevelopmentEnvironmentLoader {
   reload(): void;
   stageReload(): DevelopmentEnvironmentReload;
-  override(values: Readonly<Record<string, string | undefined>>): () => void;
+  override(values: Readonly<Record<string, string | undefined>>): void;
 }
 
 export interface DevelopmentEnvironmentReload {
@@ -60,12 +60,12 @@ export function stageDevelopmentEnvironmentFiles(appRoot: string): DevelopmentEn
   return getDevelopmentEnvironmentLoader(appRoot).stageReload();
 }
 
-/** Pins run-scoped environment overrides across reloads; returns a function restoring prior values. */
+/** Pins eval environment overrides across reloads for the lifetime of the process. */
 export function overrideDevelopmentEnvironment(
   appRoot: string,
   values: Readonly<Record<string, string | undefined>>,
-): () => void {
-  return getDevelopmentEnvironmentLoader(appRoot).override(values);
+): void {
+  getDevelopmentEnvironmentLoader(appRoot).override(values);
 }
 
 export function readDevelopmentEnvironmentHostValues(
@@ -163,16 +163,8 @@ function createDevelopmentEnvironmentLoader(appRoot: string): DevelopmentEnviron
     },
     stageReload,
     override(values) {
-      const previousOverrides = overrides;
-      const previousValues = Object.fromEntries(
-        Object.keys(values).map((key) => [key, process.env[key]]),
-      );
       overrides = { ...overrides, ...values };
       applyEnvironmentOverrides(values);
-      return () => {
-        overrides = previousOverrides;
-        applyEnvironmentOverrides(previousValues);
-      };
     },
   };
 }

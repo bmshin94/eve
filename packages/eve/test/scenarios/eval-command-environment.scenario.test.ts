@@ -119,7 +119,7 @@ describe("eve eval environment loading", () => {
     "eval failure",
     "close failure",
     "teardown failure",
-  ])("owns setup resources and restores environment after %s", async (mode) => {
+  ])("keeps setup resources and environment overrides through %s", async (mode) => {
     const fixtureRoot = await realpath(await createEnvironmentFixture());
     const previousCwd = process.cwd();
     const logger = { error: vi.fn(), log: vi.fn() };
@@ -202,12 +202,9 @@ describe("eve eval environment loading", () => {
     if (mode !== "remote") expectedLifecycle.push("close");
     expectedLifecycle.push("teardown");
     expect(lifecycle).toEqual(expectedLifecycle);
-    expect(process.env.EVE_DEV_SHARED).toBe("from-local");
-    expect(process.env.EVE_DEV_SHELL_ONLY).toBe("from-shell");
-    expect(process.env.EVE_DEV_DEFAULT_ONLY).toBe("from-env");
-    expect(process.env.EVE_EVAL_SETUP_NEW).toBeUndefined();
+    expectOverrides();
     loadDevelopmentEnvironmentFiles(fixtureRoot);
-    expect(process.env.EVE_DEV_SHARED).toBe("from-local");
+    expectOverrides();
     if (mode === "close failure" || mode === "teardown failure") {
       expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("Eval cleanup failed:"));
     }

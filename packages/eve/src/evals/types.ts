@@ -602,7 +602,7 @@ export interface EveEvalRunSummary {
 export interface EveEvalSetupResult {
   /** Overrides shell and env-file values for the run. `undefined` unsets a key. */
   readonly env?: Readonly<Record<string, string | undefined>>;
-  /** Runs after the local server stops, before environment overrides are restored. */
+  /** Runs after the local server stops, with environment overrides still active. */
   readonly teardown?: () => void | Promise<void>;
 }
 
