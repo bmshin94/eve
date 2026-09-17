@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.59.0",
+  "version": "0.59.1",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -215,6 +215,16 @@
     "./workflow-modules": {
       "eve-source": "./dist/src/public/workflow-modules.d.ts",
       "types": "./dist/src/public/workflow-modules.d.ts"
+    },
+    "./ai": {
+      "types": "./dist/src/public/ai/index.d.ts",
+      "import": "./dist/src/public/ai/index.js",
+      "default": "./dist/src/public/ai/index.js"
+    },
+    "./models": {
+      "types": "./dist/src/public/models/index.d.ts",
+      "import": "./dist/src/public/models/index.js",
+      "default": "./dist/src/public/models/index.js"
     },
     "./models/anthropic": {
       "types": "./dist/src/public/models/anthropic/index.d.ts",
@@ -442,11 +452,6 @@
       "types": "./dist/src/self-modification/config.d.ts",
       "import": "./dist/src/self-modification/config.js",
       "default": "./dist/src/self-modification/config.js"
-    },
-    "./experimental/evaluate": {
-      "types": "./dist/src/public/experimental/evaluate/index.d.ts",
-      "import": "./dist/src/public/experimental/evaluate/index.js",
-      "default": "./dist/src/public/experimental/evaluate/index.js"
     }
   },
   "publishConfig": {

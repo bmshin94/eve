@@ -2,10 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { autoRouter } from "#tools/provided/auto-router.js";
 import { executeAutoRouterTool } from "#execution/tools/auto-router.js";
-import { evaluate } from "#experimental/evaluate/evaluate.js";
+import { evaluate } from "#ai/evaluate.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 
-vi.mock("#experimental/evaluate/evaluate.js", () => ({ evaluate: vi.fn() }));
+vi.mock("#ai/evaluate.js", () => ({ evaluate: vi.fn() }));
 
 describe("autoRouter", () => {
   beforeEach(() => vi.clearAllMocks());

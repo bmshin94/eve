@@ -117,7 +117,7 @@ Authored workflow tools also receive `ctx.agents`, a replay-stable map of effect
 | `eve`                                                                       | `defineAgent`, `defineRemoteAgent`, `defineDynamic`, agent config types                                                        |
 | `eve/tools`                                                                 | `defineTool`, `defineWorkflowTool`, `defineDurableCallback`, `defineDurableSchema`, `defineDynamic`, `disableTool`, tool types |
 | `eve/tools/{bash,read_file,write_file,todo,web_fetch,load_skill,glob,grep}` | Individual reusable tool definitions                                                                                           |
-| `eve/tools/approval`                                                        | Approval types and `always`, `once`, `never`                                                                                   |
+| `eve/tools/approval`                                                        | Approval types and `auto`, `always`, `once`, `never`                                                                           |
 | `eve/tools/web_search`                                                      | Provider-managed `webSearch` configuration                                                                                     |
 | `eve/tools/workflow`                                                        | Runtime-generated `workflow` tool factory                                                                                      |
 | `eve/tools/sleep`                                                           | Opt-in durable `sleep` tool                                                                                                    |
@@ -138,9 +138,10 @@ Authored workflow tools also receive `ctx.agents`, a replay-stable map of effect
 | `eve/sandbox`                                                               | `defineSandbox`, backends                                                                                                      |
 | `eve/instrumentation`                                                       | `defineInstrumentation`, `isChannel`                                                                                           |
 | `eve/local-dev`                                                             | `getLocalDevCapability`, `LocalDevCapability`                                                                                  |
+| [`eve/models`](../guides/evaluate)                                          | Automatic model selection with `auto`                                                                                          |
 | `eve/models/openai`                                                         | `openai`, `chatgpt`, deprecated `experimental_chatgpt`                                                                         |
 | `eve/models/anthropic`                                                      | `anthropic`                                                                                                                    |
-| [`eve/experimental/evaluate`](../guides/evaluate)                           | Experimental `autoModel` and standalone `evaluate`                                                                             |
+| [`eve/ai`](../guides/evaluate#evaluate-inside-a-tool)                       | Standalone `evaluate`                                                                                                          |
 | `eve/evals`                                                                 | `defineEval`, `defineEvalConfig`, `mockModel`, eval types                                                                      |
 | `eve/evals/expect`                                                          | `includes`, `equals`, `matches`, `similarity`                                                                                  |
 | `eve/evals/reporters`                                                       | `Braintrust`, `JUnit`, `EvalReporter`                                                                                          |

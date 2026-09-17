@@ -1,4 +1,4 @@
-import { evaluate } from "#experimental/evaluate/evaluate.js";
+import { evaluate } from "#ai/evaluate.js";
 import type { JsonValue } from "#shared/json.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 import type { AutoRouterInput } from "#execution/tools/auto-router.js";

@@ -23,4 +23,4 @@ export {
   type WorkflowToolInput,
   type WorkflowToolOptions,
 } from "../../src/public/tools/workflow.ts";
-export { evaluate } from "../../src/public/experimental/evaluate/index.ts";
+export { evaluate } from "../../src/public/ai/index.ts";

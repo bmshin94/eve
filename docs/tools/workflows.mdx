@@ -348,7 +348,7 @@ export default defineAgent({
 Define the model-visible router under `agent/tools/`. Build the JEV criteria from the subagents' effective descriptions, then pass its typed choice directly to `ctx.agent()`:
 
 ```ts title="agent/tools/route_task.ts"
-import { evaluate } from "eve/experimental/evaluate";
+import { evaluate } from "eve/ai";
 import { defineWorkflowTool, type WorkflowToolContext } from "eve/tools";
 import { z } from "zod";
 
