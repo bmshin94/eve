@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 
-import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
+import {
+  loadDevelopmentEnvironmentFiles,
+  overrideDevelopmentEnvironment,
+} from "#cli/dev/environment.js";
 import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
 import {
   EVE_EVALUATION_ENV_FLAG,
@@ -21,7 +24,7 @@ import { Console } from "#evals/runner/reporters/console.js";
 import { JUnit } from "#evals/runner/reporters/junit.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 import { resolveEvalTargetHandle } from "#evals/target.js";
-import type { EveEval, EveEvalTargetHandle } from "#evals/types.js";
+import type { EveEval, EveEvalSetupResult, EveEvalTargetHandle } from "#evals/types.js";
 
 /** Parsed Commander options accepted by {@link runEvalCommand}. */
 export interface EvalCliOptions {
@@ -130,8 +133,15 @@ export async function runEvalCommand(
   let devServer: DevelopmentServer | undefined;
   let target: EveEvalTargetHandle;
   let client: Awaited<ReturnType<typeof createEvalClient>>;
+  let setupResult: EveEvalSetupResult | void;
+  let restoreEnvironment: (() => void) | undefined;
 
   try {
+    setupResult = await config.setup?.();
+    if (setupResult?.env) {
+      restoreEnvironment = overrideDevelopmentEnvironment(appRoot, setupResult.env);
+    }
+
     if (options.url) {
       client = await createEvalClient(
         { kind: "remote", url: options.url },
@@ -193,12 +203,21 @@ export async function runEvalCommand(
       process.exitCode = 1;
     }
   } finally {
-    if (devServer) {
-      await devServer.close();
-      await shutdownActiveSandboxHandles({
-        log: (message) => logger.error(message),
-      });
+    for (const cleanup of [
+      () => devServer?.close(),
+      () => devServer && shutdownActiveSandboxHandles({ log: (message) => logger.error(message) }),
+      () => setupResult?.teardown?.(),
+    ]) {
+      try {
+        await cleanup();
+      } catch (error) {
+        logger.error(
+          `Eval cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        process.exitCode = 1;
+      }
     }
+    restoreEnvironment?.();
   }
 
   const exitCode = typeof process.exitCode === "number" ? process.exitCode : 0;

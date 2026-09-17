@@ -24,6 +24,7 @@ function isMissingEnvironmentFileError(error: unknown): error is NodeJS.ErrnoExc
 interface DevelopmentEnvironmentLoader {
   reload(): void;
   stageReload(): DevelopmentEnvironmentReload;
+  override(values: Readonly<Record<string, string | undefined>>): () => void;
 }
 
 export interface DevelopmentEnvironmentReload {
@@ -57,6 +58,14 @@ export function loadDevelopmentEnvironmentFiles(appRoot: string): void {
 
 export function stageDevelopmentEnvironmentFiles(appRoot: string): DevelopmentEnvironmentReload {
   return getDevelopmentEnvironmentLoader(appRoot).stageReload();
+}
+
+/** Pins run-scoped environment overrides across reloads; returns a function restoring prior values. */
+export function overrideDevelopmentEnvironment(
+  appRoot: string,
+  values: Readonly<Record<string, string | undefined>>,
+): () => void {
+  return getDevelopmentEnvironmentLoader(appRoot).override(values);
 }
 
 export function readDevelopmentEnvironmentHostValues(
@@ -93,12 +102,17 @@ function createDevelopmentEnvironmentLoader(appRoot: string): DevelopmentEnviron
   const protectedValues = new Map(Object.entries(process.env));
   const protectedKeys = new Set(protectedValues.keys());
   const managedValues = new Map<string, string>();
+  let overrides: Readonly<Record<string, string | undefined>> = {};
 
   const stageReload = (): DevelopmentEnvironmentReload => {
     const previousManagedValues = new Map(managedValues);
     const nextValues = readDevelopmentEnvironmentValues(appRoot);
     const preferProjectOidc = applyProviderSelection(appRoot, nextValues);
-    const affectedKeys = new Set([...managedValues.keys(), ...nextValues.keys()]);
+    const affectedKeys = new Set([
+      ...managedValues.keys(),
+      ...nextValues.keys(),
+      ...Object.keys(overrides),
+    ]);
     if (preferProjectOidc) {
       affectedKeys.add("AI_GATEWAY_API_KEY");
       protectedKeys.delete("AI_GATEWAY_API_KEY");
@@ -117,6 +131,7 @@ function createDevelopmentEnvironmentLoader(appRoot: string): DevelopmentEnviron
       nextValues,
       protectedKeys,
     });
+    applyEnvironmentOverrides(overrides);
 
     return {
       commit() {
@@ -147,7 +162,26 @@ function createDevelopmentEnvironmentLoader(appRoot: string): DevelopmentEnviron
       stageReload().commit();
     },
     stageReload,
+    override(values) {
+      const previousOverrides = overrides;
+      const previousValues = Object.fromEntries(
+        Object.keys(values).map((key) => [key, process.env[key]]),
+      );
+      overrides = { ...overrides, ...values };
+      applyEnvironmentOverrides(values);
+      return () => {
+        overrides = previousOverrides;
+        applyEnvironmentOverrides(previousValues);
+      };
+    },
   };
+}
+
+function applyEnvironmentOverrides(values: Readonly<Record<string, string | undefined>>): void {
+  for (const [key, value] of Object.entries(values)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
 }
 
 function applyProviderSelection(appRoot: string, values: Map<string, string>): boolean {

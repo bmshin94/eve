@@ -56,4 +56,8 @@ describe("defineEvalConfig", () => {
       "`reporters` must be an array",
     );
   });
+
+  it("rejects a non-function setup", () => {
+    expect(() => defineInvalidConfig({ setup: {} as never })).toThrow("`setup` must be a function");
+  });
 });

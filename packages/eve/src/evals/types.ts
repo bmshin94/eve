@@ -598,6 +598,14 @@ export interface EveEvalRunSummary {
 // Eval run configuration
 // ---------------------------------------------------------------------------
 
+/** Resources owned by one `eve eval` invocation. */
+export interface EveEvalSetupResult {
+  /** Overrides shell and env-file values for the run. `undefined` unsets a key. */
+  readonly env?: Readonly<Record<string, string | undefined>>;
+  /** Runs after the local server stops, before environment overrides are restored. */
+  readonly teardown?: () => void | Promise<void>;
+}
+
 /**
  * Run-wide eval configuration authored in `evals.config.ts`.
  *
@@ -605,6 +613,12 @@ export interface EveEvalRunSummary {
  * directory; it supplies the defaults every eval in the run shares.
  */
 export interface EveEvalConfigInput {
+  /**
+   * Runs once before target startup, except for `--list` or an empty selection.
+   * Returned resources are cleaned up even when startup or eval execution fails.
+   * With `--url`, setup runs locally; env overrides do not change the remote server.
+   */
+  readonly setup?: () => void | EveEvalSetupResult | Promise<void | EveEvalSetupResult>;
   /**
    * Default judge model for `t.judge.*` assertions across every eval.
    * Optional: evals that use no judge need not set it, and individual evals

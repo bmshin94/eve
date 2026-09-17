@@ -58,6 +58,37 @@ export default defineEvalConfig({
 
 Everything is optional. `judge` sets the default model for [LLM-as-judge](./judge) assertions (`t.judge.*`); a tree of fully deterministic evals can omit it. `reporters`, `maxConcurrency`, and `timeoutMs` round out the defaults. Config `reporters` observe every eval in the run, so set one `Braintrust()` here instead of adding it to each eval. CLI flags (`--max-concurrency`, `--timeout`) and per-eval values take precedence over the config defaults.
 
+### Run setup and teardown
+
+Use `setup` to start shared resources or run migrations before eve starts the local agent server. Return environment overrides and an optional `teardown` function:
+
+```ts title="evals/evals.config.ts"
+import { defineEvalConfig } from "eve/evals";
+import { startTestDatabase } from "./database.js";
+
+export default defineEvalConfig({
+  async setup() {
+    const database = await startTestDatabase();
+    return {
+      env: {
+        POSTGRES_URL: database.url,
+        AURORA_PGHOST: undefined,
+      },
+      teardown: () => database.close(),
+    };
+  },
+});
+```
+
+`startTestDatabase` is your own helper; it should return only after the database is ready and migrations have finished. `setup` can also return nothing when it only needs to perform initialization.
+
+- Setup runs once per `eve eval` invocation, after discovery and config loading, before target startup. It does not run for `--list` or when no evals are selected. Read setup environment values inside `test(t)`, not at module scope: eval modules are imported during discovery.
+- Returned `env` values override shell variables and `.env` files for the runner and local agent, including subsequent env-file reloads. `undefined` removes a variable for the run.
+- Teardown runs after the local server and its sandbox handles shut down, including after startup or eval failures. Overrides remain available during teardown and are restored afterward, even if teardown throws. Cleanup failures fail the command.
+- `--skip-report` does not disable setup or teardown. With `--url`, both run locally; overrides cannot change the remote server's environment.
+
+If setup throws before returning, it must clean up any resources it already created. The per-eval `timeoutMs` does not apply to setup or teardown.
+
 ## Deterministic fixture models
 
 Use `mockModel` when an eval fixture needs to exercise eve's runtime without calling a model provider. A static fixture can be one line:

@@ -45,6 +45,7 @@ export type {
   EveEval,
   EveEvalConfig,
   EveEvalConfigInput,
+  EveEvalSetupResult,
   EveEvalDefinition,
   EveEvalInput,
   EveEvalLiveTurn,
