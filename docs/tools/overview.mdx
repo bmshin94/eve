@@ -140,7 +140,7 @@ cohort and instructs the model to acknowledge that the work started without wait
 launches keep conditional delivery and send no acknowledgement.
 By default, successful completions wait for the overlapping tasks to settle, then
 one task-triggered parent turn receives their results together. Set
-`taskWakePolicy: "single"` in the [channel configuration](/docs/channels/overview#background-task-results) to
+`taskWakePolicy: "individual"` in the [channel configuration](/docs/channels/overview#background-task-results) to
 receive ready results while other tasks continue; results already queued from the
 same cohort may share a turn. The reporting context then includes only the results
 delivered in that turn. User questions, input requests, failures, cancellation,

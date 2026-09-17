@@ -228,7 +228,7 @@ export class SessionInputQueue {
       if (entry.kind === "control") return true;
       if (entry.kind === "authorization" || deferDeliveries) return false;
       const cohort = completionCohort(entry.delivery, cohorts);
-      return wakePolicy === "single" || cohort === undefined || !pendingCohorts.has(cohort);
+      return wakePolicy === "individual" || cohort === undefined || !pendingCohorts.has(cohort);
     });
   }
 

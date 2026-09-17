@@ -290,9 +290,9 @@ export function defineChannel<
   if (
     definition.taskWakePolicy !== undefined &&
     definition.taskWakePolicy !== "cohort" &&
-    definition.taskWakePolicy !== "single"
+    definition.taskWakePolicy !== "individual"
   ) {
-    throw new Error('taskWakePolicy must be "cohort" or "single".');
+    throw new Error('taskWakePolicy must be "cohort" or "individual".');
   }
   const adapter = buildAdapter(definition);
   const cors = normalizeChannelCors(definition.cors);

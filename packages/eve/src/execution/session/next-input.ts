@@ -46,7 +46,7 @@ export async function nextTurnDelivery(input: {
       {
         deferDeliveries: input.deferDeliveries,
         wakePolicy:
-          cursor.serializedContext["eve.taskWakePolicy"] === "single" ? "single" : "cohort",
+          cursor.serializedContext["eve.taskWakePolicy"] === "individual" ? "individual" : "cohort",
         expectedAttemptIds: input.expectedAttemptIds,
         freshSequence: inbox.hasPending() ? undefined : freshSequence,
       },

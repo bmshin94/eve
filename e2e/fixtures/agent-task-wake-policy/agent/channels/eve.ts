@@ -1,7 +1,7 @@
 import { eveChannel } from "eve/channels/eve";
 
 export default eveChannel({
-  taskWakePolicy: "single",
+  taskWakePolicy: "individual",
   auth: () => ({
     attributes: { fixture: "task-wake-policy" },
     authenticator: "e2e-fixture",

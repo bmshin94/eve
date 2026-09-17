@@ -112,7 +112,7 @@ describe("createRuntimeAdapterRegistry", () => {
     it("rejects a policy on the reserved HTTP adapter instead of discarding it", () => {
       expect(() =>
         createRuntimeAdapterRegistry({
-          channels: [makeChannelDefinition({ kind: "http", taskWakePolicy: "single" })],
+          channels: [makeChannelDefinition({ kind: "http", taskWakePolicy: "individual" })],
         }),
       ).toThrow(RuntimeRegistryError);
     });

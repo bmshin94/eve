@@ -38,7 +38,7 @@ function getAdapter(channel: unknown): ChannelAdapter<any> {
 }
 
 describe("defineChannel", () => {
-  it.each(["cohort", "single"] as const)(
+  it.each(["cohort", "individual"] as const)(
     "retains a policy-only channel across step boundaries: %s",
     async (taskWakePolicy) => {
       const channel = defineChannel({ routes: [], taskWakePolicy });
@@ -58,13 +58,13 @@ describe("defineChannel", () => {
 
   it("rejects an unsupported task wake policy", () => {
     expect(() => defineChannel({ routes: [], taskWakePolicy: "invalid" as never })).toThrow(
-      'taskWakePolicy must be "cohort" or "single".',
+      'taskWakePolicy must be "cohort" or "individual".',
     );
   });
 
   it("forwards the eve channel task wake policy to its adapter", () => {
-    const channel = eveChannel({ auth: () => null, taskWakePolicy: "single" });
-    expect(getAdapter(channel).taskWakePolicy).toBe("single");
+    const channel = eveChannel({ auth: () => null, taskWakePolicy: "individual" });
+    expect(getAdapter(channel).taskWakePolicy).toBe("individual");
   });
 
   it("preserves the configured turn policy", () => {

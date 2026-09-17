@@ -16,11 +16,11 @@ do not invoke the parent model. Work started after the cohort settles forms a ne
 cohort. This is the default `taskWakePolicy: "cohort"` behavior.
 
 To deliver independent results without waiting for unfinished siblings, set
-`taskWakePolicy: "single"` on the channel that starts the session. See
+`taskWakePolicy: "individual"` on the channel that starts the session. See
 [Background task results](/docs/channels/overview#background-task-results) for a
 channel configuration example.
 
-With `"single"`, a successful result can start a parent turn while other tasks
+With `"individual"`, a successful result can start a parent turn while other tasks
 are still running. Results from the same cohort already queued when the parent
 becomes available may share a turn; this setting does not guarantee one turn per
 task. The reporting context includes the results delivered in that turn, without

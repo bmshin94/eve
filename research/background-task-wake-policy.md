@@ -17,11 +17,11 @@ import { localDev } from "eve/channels/auth";
 
 export default eveChannel({
   auth: localDev(),
-  taskWakePolicy: "single",
+  taskWakePolicy: "individual",
 });
 ```
 
-`taskWakePolicy` accepts `"cohort"` (default) or `"single"` on `defineChannel`
+`taskWakePolicy` accepts `"cohort"` (default) or `"individual"` on `defineChannel`
 and its built-in wrappers. It controls background results for sessions started
 on that channel. Agent definitions do not carry this setting: the same agent can
 have different wake policies on different channels. Child sessions use their own
@@ -31,12 +31,12 @@ channel policy.
 
 A cohort contains overlapping tasks, including launches in later user turns.
 The existing cohort policy holds successful completions until the cohort settles.
-Single policy makes each successful completion eligible without waiting for
+Individual policy makes each successful completion eligible without waiting for
 unfinished siblings. Results from the same cohort already queued when the parent
 becomes available may share a turn. It does not promise one turn per completion.
 
 For tasks A and B, releasing A while B remains gated produces a report for A under
-single policy. Releasing B later produces a report for B, with only B's output in
+individual policy. Releasing B later produces a report for B, with only B's output in
 the new reporting context. Cohort policy continues to produce one report after
 both are terminal. User input and intervention notifications retain their existing
 ordering and remain serviceable with unfinished background work.
@@ -56,4 +56,4 @@ Existing task ownership, terminal-state persistence, cancellation, duplicate
 suppression, and invocation settlement are unchanged. Regression coverage checks
 partial and buffered completions, cross-turn siblings, input ordering, reporting
 context, and configuration propagation. A deterministic fixture eval gates two
-children independently to check the externally visible single-policy behavior.
+children independently to check the externally visible individual-policy behavior.

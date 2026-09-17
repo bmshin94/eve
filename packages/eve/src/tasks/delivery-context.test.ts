@@ -101,7 +101,7 @@ describe("resolveInitiatingTaskContext", () => {
 });
 
 describe("resolveTaskDeliveryContext", () => {
-  it("single projects only the delivered results while another task is unfinished", () => {
+  it("individual projects only the delivered results while another task is unfinished", () => {
     const first = {
       taskId: "task_1",
       status: "completed",
@@ -121,7 +121,7 @@ describe("resolveTaskDeliveryContext", () => {
     const result = resolveTaskDeliveryContext({
       state,
       taskDeliveryId: "task_2:ready:completed",
-      wakePolicy: "single",
+      wakePolicy: "individual",
     });
     expect(result?.phase).toBe("settled");
     expect(result?.rootTurnId).toBe("turn_2");
@@ -133,7 +133,7 @@ describe("resolveTaskDeliveryContext", () => {
     const batch = resolveTaskDeliveryContext({
       state,
       taskDeliveryId: "task_1:ready:completed",
-      wakePolicy: "single",
+      wakePolicy: "individual",
       taskDeliveryIds: ["task_1:ready:completed", "task_2:ready:completed"],
     });
     expect(batch?.phase).toBe("settled");
@@ -144,11 +144,11 @@ describe("resolveTaskDeliveryContext", () => {
     ).toEqual(["task_1", "task_2"]);
   });
 
-  it("single keeps an advisory wake pending until the delivered task is terminal", () => {
+  it("individual keeps an advisory wake pending until the delivered task is terminal", () => {
     const result = resolveTaskDeliveryContext({
       state: taskState([taskEntry("task_1", "turn_1")]),
       taskDeliveryId: "task_1:message:1",
-      wakePolicy: "single",
+      wakePolicy: "individual",
     });
     expect(result?.phase).toBe("pending");
   });

@@ -2535,7 +2535,7 @@ describe("turnStep", () => {
     });
   });
 
-  it.each([undefined, "cohort", "single"] as const)(
+  it.each([undefined, "cohort", "individual"] as const)(
     "persists resolved task wake policy %s for the inbox",
     async (wakePolicy) => {
       const bundle = createStubBundle();

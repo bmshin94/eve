@@ -53,7 +53,7 @@ export function resolveTaskDeliveryContext(input: {
 
   const deliveryIds = input.taskDeliveryIds ?? [input.taskDeliveryId];
   const cohort = entries.filter((entry) =>
-    input.wakePolicy === "single"
+    input.wakePolicy === "individual"
       ? deliveryIds.some((id) => id.startsWith(`${entry.taskId}:`))
       : getTaskCohortId(entry) === getTaskCohortId(delivered),
   );

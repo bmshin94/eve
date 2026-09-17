@@ -82,7 +82,7 @@ Set `taskWakePolicy` on the channel to choose when successful background task
 results wake the session:
 
 - `"cohort"` (default): wait for overlapping tasks to settle, then deliver their successful results together.
-- `"single"`: deliver ready results without waiting for unfinished siblings. Already-queued results from the same cohort may share a turn.
+- `"individual"`: deliver ready results without waiting for unfinished siblings. Already-queued results from the same cohort may share a turn.
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
@@ -90,7 +90,7 @@ import { slackChannel } from "eve/channels/slack";
 
 export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
-  taskWakePolicy: "single",
+  taskWakePolicy: "individual",
 });
 ```
 
