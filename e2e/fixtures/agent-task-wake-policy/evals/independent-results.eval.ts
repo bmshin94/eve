@@ -1,3 +1,0 @@
-import { resultDeliveryEval } from "./helpers/result-delivery";
-
-export default resultDeliveryEval();

@@ -7,7 +7,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     message.startsWith("Bob prepares report "),
   );
   if (assignment !== undefined) {
-    const marker = assignment.includes("report A") ? "A" : "B";
+    const marker = assignment.match(/report ([ABC])/)![1]!;
     if (!request.toolResults.some((result) => result.name === "release")) {
       return { toolCalls: [{ name: "release", input: { marker } }] };
     }
@@ -23,7 +23,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
           message.startsWith("Background task task_"),
       ) ?? "";
   if (last.includes("Alice checks the status")) return "STATUS:AVAILABLE";
-  const pending = ["A", "B"].filter(
+  const pending = ["A", "B", "C"].filter(
     (marker) => !request.toolResults.some((result) => result.id === `report-${marker}`),
   );
   if (pending.length > 0) {
@@ -50,10 +50,6 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   const results =
     state?.tasks.flatMap((task) => (task.output?.type === "result" ? [task.output.data] : [])) ??
     [];
-  const dependent = request.userMessages.some((message) => message.includes("joint comparison"));
-  if (dependent && results.length > 0 && state?.tasks.some((task) => task.status === "pending")) {
-    return "<eve-empty-delivery/>";
-  }
   const reported = new Set(
     request.messages.flatMap((message) =>
       message.role === "assistant" && message.text.startsWith('["REPORT:')
@@ -64,7 +60,12 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   const unreported = results.filter(
     (result) => typeof result === "string" && !reported.has(result),
   );
-  return unreported.length > 0 ? JSON.stringify(unreported.sort()) : "REPORTS:STARTED";
+  const ready = unreported.filter(
+    (result) =>
+      result === "REPORT:A" || (results.includes("REPORT:B") && results.includes("REPORT:C")),
+  );
+  if (ready.length > 0) return JSON.stringify(ready.sort());
+  return results.length > 0 ? "<eve-empty-delivery/>" : "REPORTS:STARTED";
 }
 
 const base = e2eAgentConfig({ mock: respond });

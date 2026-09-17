@@ -7,7 +7,7 @@ export default defineSchedule({
   run({ to, waitUntil, appAuth }) {
     waitUntil(
       to(reports, { id: crypto.randomUUID() }).send(
-        "Alice asks Bob to prepare reports A and B for a joint comparison. Share the comparison once both reports are available.",
+        "Alice asks Bob to prepare reports A, B, and C. Report A is independent; reports B and C form a joint comparison. Share A when ready and combine B with C once both are available.",
         { auth: appAuth },
       ),
     );
