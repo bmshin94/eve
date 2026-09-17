@@ -88,6 +88,18 @@ The `auth` option controls which principal the session runs as. A handler may in
 
 A handler-form session runs on the same durable runtime engine as any other session, so it can park (durably suspend), for instance when the channel handoff is waiting for a Slack reply. Only markdown task mode is barred from waiting.
 
+## Background task results
+
+Schedule-started sessions default to `"cohort"`: successful background task results
+wait for overlapping tasks to settle before waking the parent. This includes
+handler schedules that send through Slack or another channel. An explicit
+`taskWakePolicy` on that channel takes precedence; set it to `"individual"` to
+report ready results while other tasks continue. See
+[Background task results](./channels/overview#background-task-results).
+
+A scheduled task-mode session stays alive while it owns pending background tasks,
+even when `"individual"` lets it report a completed result first.
+
 ## Session continuity
 
 Markdown schedules start a new session on every fire. Handler schedules do too, unless they send to an existing conversation, such as a Slack thread. Store data that must survive across fires outside session state.

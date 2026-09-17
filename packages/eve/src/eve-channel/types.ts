@@ -144,7 +144,7 @@ export interface EveChannelInput {
   readonly cors?: EveChannelCors;
   /** Policy for follow-up messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
-  /** Background task result delivery policy. Defaults to "cohort". */
+  /** Background task result delivery policy. Defaults to "individual", or "cohort" for schedule-started sessions. */
   readonly taskWakePolicy?: TaskWakePolicy;
   /**
    * Pre-dispatch hook for inbound eve HTTP messages. Runs after route auth and body

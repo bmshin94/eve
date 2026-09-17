@@ -1,5 +1,5 @@
 ---
-"eve": patch
+"eve": minor
 ---
 
-Add `taskWakePolicy: "individual"` on channel definitions to deliver completed background task results without waiting for unfinished siblings. The default `"cohort"` policy continues to deliver successful results together after overlapping tasks settle.
+Channel sessions now deliver ready background task results without waiting for unfinished siblings; set `taskWakePolicy: "cohort"` on the channel to preserve grouped delivery. Schedule-started sessions retain the `"cohort"` default unless the channel explicitly selects `"individual"`, and scheduled task-mode sessions remain alive until their pending tasks settle.

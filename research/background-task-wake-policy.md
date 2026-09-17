@@ -21,11 +21,14 @@ export default eveChannel({
 });
 ```
 
-`taskWakePolicy` accepts `"cohort"` (default) or `"individual"` on `defineChannel`
+`taskWakePolicy` accepts `"cohort"` or `"individual"` on `defineChannel`
 and its built-in wrappers. It controls background results for sessions started
 on that channel. Agent definitions do not carry this setting: the same agent can
 have different wake policies on different channels. Child sessions use their own
-channel policy.
+channel policy. Ordinary channel sessions default to `"individual"`; schedule-started
+sessions default to `"cohort"`, including handler schedules that target another
+channel. An explicit channel setting wins over either default. Internal subagent
+sessions retain `"cohort"`.
 
 ## Observable behavior
 
@@ -45,15 +48,19 @@ ordering and remain serviceable with unfinished background work.
 
 The channel definition validates the wake policy and carries it on its adapter.
 Policy-only channels keep a distinct adapter identity for rehydration. Each model
-step records its channel policy in durable context so the workflow input queue
-can decide eligibility without running the parent model. The queue preserves all
+step resolves the channel override or schedule-dependent default and records it
+in durable context so the workflow input queue can decide eligibility without
+running the parent model. The queue preserves all
 notification identities when it combines ready results; routing may strip task
 payloads after caching their terminal views, so reporting uses those identities
 to select the delivered results. The parent activity root remains tied to the
 first delivered task's creating turn.
 
-Existing task ownership, terminal-state persistence, cancellation, duplicate
-suppression, and invocation settlement are unchanged. Regression coverage checks
-partial and buffered completions, cross-turn siblings, input ordering, reporting
-context, and configuration propagation. A deterministic fixture eval gates two
-children independently to check the externally visible individual-policy behavior.
+Scheduled task-mode sessions check their durable task index as well as newly
+launched tasks before finishing. Reporting one individual completion cannot
+finish the session or cancel unfinished siblings. Task ownership, terminal-state
+persistence, cancellation, and duplicate suppression retain their existing rules.
+Regression coverage checks partial and buffered completions, cross-turn siblings,
+input ordering, reporting context, schedule defaults and overrides, task-mode
+completion, and configuration propagation. A deterministic fixture eval gates two
+children independently to check the default individual-policy behavior.

@@ -69,7 +69,7 @@ export interface GenericChannelDefinition<
 > {
   /** Policy used by message sends that do not provide an explicit override. */
   readonly turnPolicy?: TurnPolicy;
-  /** Successful task results wait for their cohort by default; "individual" releases ready results without waiting for unfinished siblings. */
+  /** Background task result delivery policy. Defaults to "individual", or "cohort" for schedule-started sessions. */
   readonly taskWakePolicy?: TaskWakePolicy;
   deliver?(payload: DeliverPayload, ctx: TCtx): StepInput | void | Promise<StepInput | void>;
   readonly state?: TState;

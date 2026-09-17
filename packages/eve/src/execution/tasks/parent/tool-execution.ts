@@ -21,7 +21,11 @@ import { parseJsonValue } from "#shared/json.js";
 import { projectToolStartLabel } from "#harness/action-presentation.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { createTaskMessage, isTaskMessage, type TaskExec } from "#tools/task.js";
-import { findSessionTaskEntry, recordSessionTask } from "#tasks/session-index.js";
+import {
+  findSessionTaskEntry,
+  getSessionTaskIndex,
+  recordSessionTask,
+} from "#tasks/session-index.js";
 import type { AgentView } from "#subagents/handles/prompt.js";
 import {
   beginBackgroundTask,
@@ -195,7 +199,11 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
   }
 
   hasPendingTasks(): boolean {
-    return this.records.some((record) => record.settled && record.task !== undefined);
+    return (
+      getSessionTaskIndex(this.initialSession.state).some(
+        (entry) => entry.terminalView === undefined,
+      ) || this.records.some((record) => record.settled && record.task !== undefined)
+    );
   }
 
   async commit(session: HarnessSession): Promise<HarnessSession> {

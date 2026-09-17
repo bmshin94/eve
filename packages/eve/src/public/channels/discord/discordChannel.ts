@@ -157,7 +157,7 @@ export interface DiscordChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
-  /** Background task result delivery policy. Defaults to "cohort". */
+  /** Background task result delivery policy. Defaults to "individual", or "cohort" for schedule-started sessions. */
   readonly taskWakePolicy?: TaskWakePolicy;
 
   /** Inbound command hook. Defaults to user-scoped Discord auth and dispatch. Return `{ auth }` to dispatch, or `null` to acknowledge without running the agent. */

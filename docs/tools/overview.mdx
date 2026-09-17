@@ -138,13 +138,14 @@ After the initiating turn accepts background tasks, eve supplies runtime-authore
 cohort and instructs the model to acknowledge that the work started without waiting for results.
 [Schedule](/docs/schedules)-initiated turns are the exception: no user prompted them, so their
 launches keep conditional delivery and send no acknowledgement.
-By default, successful completions wait for the overlapping tasks to settle, then
-one task-triggered parent turn receives their results together. Set
-`taskWakePolicy: "individual"` in the [channel configuration](/docs/channels/overview#background-task-results) to
-receive ready results while other tasks continue; results already queued from the
-same cohort may share a turn. The reporting context then includes only the results
-delivered in that turn. User questions, input requests, failures, cancellation,
-and explicit `task.postMessage` calls do not wait for the cohort under either policy.
+Channel sessions default to `"individual"`: ready results can wake the parent while
+other tasks continue. Results already queued from the same cohort may share a turn,
+and the reporting context includes only the results delivered in that turn.
+Schedule-started sessions default to `"cohort"`: successful completions wait for
+overlapping tasks to settle, then arrive together. An explicit `taskWakePolicy` in
+the [channel configuration](/docs/channels/overview#background-task-results) overrides
+either default. User questions, input requests, failures, cancellation, and explicit
+`task.postMessage` calls do not wait for the cohort under either policy.
 See [Completion batching](/docs/subagents#completion-batching).
 
 ### Yield and return

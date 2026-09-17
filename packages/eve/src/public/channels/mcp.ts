@@ -47,7 +47,7 @@ export interface McpChannelInput {
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
   /** Override the default MCP route path (`/eve/v1/mcp`). */
   readonly route?: string;
-  /** Background task result delivery policy. Defaults to "cohort". */
+  /** Background task result delivery policy. Defaults to "individual", or "cohort" for schedule-started sessions. */
   readonly taskWakePolicy?: TaskWakePolicy;
 }
 

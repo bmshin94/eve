@@ -68,7 +68,11 @@ describe("createRuntimeAdapterRegistry", () => {
         state: {},
       });
 
-      expect(rehydrated).toEqual({ kind: SCHEDULE_ADAPTER_KIND, state: {} });
+      expect(rehydrated).toEqual({
+        kind: SCHEDULE_ADAPTER_KIND,
+        state: {},
+        taskWakePolicy: "cohort",
+      });
     });
 
     // Mirror of the schedule rehydration regression — proves the

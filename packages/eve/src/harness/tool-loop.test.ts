@@ -871,6 +871,89 @@ function createGatewayModelCallError(input: {
 }
 
 describe("createToolLoopHarness", () => {
+  it("keeps a scheduled task session alive across individual results until all tasks settle", async () => {
+    const { SessionInputQueue } = await import("#execution/session/input-queue.js");
+    const { getSessionTaskCohorts } = await import("#tasks/session-task-cohorts.js");
+    const { cacheTerminalTaskView } = await import("#tasks/session-index.js");
+    const { resolveTaskDeliveryContext } = await import("#tasks/delivery-context.js");
+    const { backgroundToolExecutionProvider } =
+      await import("#execution/tasks/parent/tool-execution.js");
+    const schema = {
+      properties: { summary: { type: "string" } },
+      required: ["summary"],
+      type: "object",
+    } as const;
+    let session = recordBackgroundTask(
+      recordBackgroundTask(createTestSession({ outputSchema: schema }), "A"),
+      "B",
+    );
+    const queue = new SessionInputQueue();
+    queue.enqueueDelivery({
+      kind: "deliver",
+      taskDeliveryId: "A:ready:completed",
+      payloads: [{ message: "A completed" }],
+    });
+    expect(
+      queue.takeNext(getSessionTaskCohorts(session.state), { wakePolicy: "cohort" }),
+    ).toBeUndefined();
+    expect(
+      queue.takeNext(getSessionTaskCohorts(session.state), { wakePolicy: "individual" })?.kind,
+    ).toBe("turn");
+    session = {
+      ...session,
+      state: cacheTerminalTaskView(session.state, {
+        taskId: "A",
+        metadata: { kind: "report-probe", name: "A" },
+        status: "completed",
+        lastOutput: { type: "result", data: "Report A" },
+      }),
+    };
+    const report = resolveTaskDeliveryContext({
+      state: session.state,
+      taskDeliveryId: "A:ready:completed",
+      wakePolicy: "individual",
+    })!;
+    const ctx = new ContextContainer();
+    ctx.set(ScheduleIdKey, "scheduled-report");
+    ctx.set(TurnTaskDeliveryKey, report.phase);
+    const scope = await backgroundToolExecutionProvider.create(ctx, session);
+    if (scope === undefined) throw new Error("Expected background executor");
+    ctx.set(BackgroundToolExecutorKey, scope.value);
+    expect(scope.value.hasPendingTasks?.()).toBe(true);
+    setupMockAgent(finalOutputResult("Report A", { summary: "Report A" }));
+    const runStep = createToolLoopHarness(createTestConfig("task"));
+    const result = await contextStorage.run(ctx, () =>
+      runStep(session, { message: "A completed", context: [report.context] }),
+    );
+    expect(getSessionTaskCohorts(result.session.state).get("B")?.settled).toBe(false);
+    expect(result.next).toBeNull();
+
+    session = {
+      ...result.session,
+      state: cacheTerminalTaskView(result.session.state, {
+        taskId: "B",
+        metadata: { kind: "report-probe", name: "B" },
+        status: "completed",
+        lastOutput: { type: "result", data: "Report B" },
+      }),
+    };
+    const finalReport = resolveTaskDeliveryContext({
+      state: session.state,
+      taskDeliveryId: "B:ready:completed",
+      wakePolicy: "individual",
+    })!;
+    ctx.set(TurnTaskDeliveryKey, finalReport.phase);
+    const finalScope = await backgroundToolExecutionProvider.create(ctx, session);
+    if (finalScope === undefined) throw new Error("Expected background executor");
+    ctx.set(BackgroundToolExecutorKey, finalScope.value);
+    expect(finalScope.value.hasPendingTasks?.()).toBe(false);
+    setupMockAgent(finalOutputResult("Report B", { summary: "Report B" }));
+    const finalResult = await contextStorage.run(ctx, () =>
+      runStep(session, { message: "B completed", context: [finalReport.context] }),
+    );
+    expect(finalResult.next).toEqual({ done: true, output: { summary: "Report B" } });
+  });
+
   it("uses one projected history view for step consumers while preserving raw history", async () => {
     setupMockAgent({
       finishReason: "stop",

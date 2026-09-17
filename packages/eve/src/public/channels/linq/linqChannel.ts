@@ -67,7 +67,7 @@ export interface LinqChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
-  /** Background task result delivery policy. Defaults to "cohort". */
+  /** Background task result delivery policy. Defaults to "individual", or "cohort" for schedule-started sessions. */
   readonly taskWakePolicy?: TaskWakePolicy;
   /** Display name used by the Chat SDK runtime. Defaults to `"eve"`. */
   readonly userName?: string;

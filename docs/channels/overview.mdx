@@ -81,8 +81,8 @@ A cross-channel `send(...)` supplies input to the agent and invokes the model on
 Set `taskWakePolicy` on the channel to choose when successful background task
 results wake the session:
 
-- `"cohort"` (default): wait for overlapping tasks to settle, then deliver their successful results together.
-- `"individual"`: deliver ready results without waiting for unfinished siblings. Already-queued results from the same cohort may share a turn.
+- `"individual"` (channel default): deliver ready results without waiting for unfinished siblings. Already-queued results from the same cohort may share a turn.
+- `"cohort"` (schedule default): wait for overlapping tasks to settle, then deliver their successful results together.
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
@@ -90,7 +90,7 @@ import { slackChannel } from "eve/channels/slack";
 
 export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
-  taskWakePolicy: "individual",
+  taskWakePolicy: "cohort",
 });
 ```
 
@@ -99,6 +99,11 @@ wrappers. Each channel chooses its own policy for sessions it starts; the same
 agent can use different policies on Slack and HTTP. The setting covers results
 from background tools and subagents in those sessions. It does not configure the
 subagents' own sessions.
+
+An explicit channel setting takes precedence. When the setting is omitted,
+sessions started by a [schedule](../schedules) use `"cohort"`, including schedules
+that send through Slack or another channel. Other channel sessions use
+`"individual"`.
 
 Failures, cancellations, input requests, and explicit task messages remain
 eligible for delivery under either policy. User messages follow `turnPolicy`.

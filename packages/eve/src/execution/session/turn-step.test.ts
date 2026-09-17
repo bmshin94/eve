@@ -2535,9 +2535,16 @@ describe("turnStep", () => {
     });
   });
 
-  it.each([undefined, "cohort", "individual"] as const)(
-    "persists resolved task wake policy %s for the inbox",
-    async (wakePolicy) => {
+  it.each([
+    [undefined, false, "individual"],
+    [undefined, true, "cohort"],
+    ["cohort", false, "cohort"],
+    ["cohort", true, "cohort"],
+    ["individual", false, "individual"],
+    ["individual", true, "individual"],
+  ] as const)(
+    "resolves channel policy %s with schedule provenance %s to %s",
+    async (wakePolicy, scheduled, expected) => {
       const bundle = createStubBundle();
       vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
         ...bundle,
@@ -2547,18 +2554,53 @@ describe("turnStep", () => {
           ]),
         },
       } as typeof bundle);
-      installSessionStoreMocks([createStubSession()]);
-      vi.mocked(createExecutionNodeStep).mockImplementation(() => async (session) => ({
-        next: { done: true, output: "ok" },
-        session,
-      }));
+      const metadata = { kind: "report-probe", name: "report_probe" };
+      const session = createStubSession({
+        state: {
+          "eve.tasks": {
+            version: 2,
+            tasks: ["A", "B"].map((taskId) => ({
+              taskId,
+              taskRunId: `run-${taskId}`,
+              taskInboxToken: `inbox-${taskId}`,
+              createdByTurnId: "turn-parent",
+              cohortId: "A",
+              dispatchContext: { auth: { current: null, initiator: null } },
+              metadata,
+              ...(taskId === "A"
+                ? {
+                    terminalView: {
+                      taskId,
+                      metadata,
+                      status: "completed",
+                      lastOutput: { type: "result", data: "Report A" },
+                    },
+                  }
+                : {}),
+            })),
+          },
+        },
+      });
+      installSessionStoreMocks([session]);
+      const phases: unknown[] = [];
+      vi.mocked(createExecutionNodeStep).mockImplementation(() => async (session) => {
+        phases.push(contextStorage.getStore()?.get(TurnTaskDeliveryKey));
+        return { next: { done: true, output: "ok" }, session };
+      });
+      const serializedContext = createSerializedContext();
+      if (scheduled) serializedContext[ScheduleIdKey.name] = "daily-report";
       const result = await turnStep({
-        input: { kind: "deliver", payloads: [{ message: "Alice asks for a status update." }] },
+        input: {
+          kind: "deliver",
+          taskDeliveryId: "A:ready:completed",
+          payloads: [{ message: "A completed." }],
+        },
         sessionWritable: createTestWritable(),
-        serializedContext: createSerializedContext(),
+        serializedContext,
         sessionState: createStubSessionState(),
       });
-      expect(result.serializedContext["eve.taskWakePolicy"]).toBe(wakePolicy ?? "cohort");
+      expect(result.serializedContext["eve.taskWakePolicy"]).toBe(expected);
+      expect(phases).toEqual([expected === "individual" ? "settled" : "pending"]);
     },
   );
 

@@ -181,7 +181,7 @@ export interface ChatSdkChannelConfig<
   readonly routes?: Partial<Record<Extract<keyof TAdapters, string>, string>>;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
-  /** Background task result delivery policy. Defaults to "cohort". */
+  /** Background task result delivery policy. Defaults to "individual", or "cohort" for schedule-started sessions. */
   readonly taskWakePolicy?: TaskWakePolicy;
   /** Extra Chat SDK webhook options. eve owns `waitUntil`. */
   readonly webhook?: Omit<WebhookOptions, "waitUntil">;

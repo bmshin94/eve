@@ -9,14 +9,14 @@ eve supports two ways to delegate work: the root-only built-in `agent` tool, whi
 
 Overlapping background work owned by a session forms a cohort. Tasks launched in
 later user turns join the open cohort while earlier work is still pending or its
-successful results await delivery. eve holds successful completion notifications
+successful results await delivery. With `taskWakePolicy: "cohort"`, eve holds successful completion notifications
 until every task in that cohort has completed, failed, or been cancelled, then
 delivers the successful results together in one parent turn. Partial completions
 do not invoke the parent model. Work started after the cohort settles forms a new
-cohort. This is the default `taskWakePolicy: "cohort"` behavior.
+cohort.
 
-To deliver independent results without waiting for unfinished siblings, set
-`taskWakePolicy: "individual"` on the channel that starts the session. See
+Channel sessions default to `"individual"`; sessions started by schedules default
+to `"cohort"`. An explicit `taskWakePolicy` on the channel overrides either default. See
 [Background task results](/docs/channels/overview#background-task-results) for a
 channel configuration example.
 

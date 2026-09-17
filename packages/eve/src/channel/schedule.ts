@@ -27,6 +27,7 @@ export const SCHEDULE_ADAPTER_KIND = "schedule";
 
 export const SCHEDULE_ADAPTER: ChannelAdapter = {
   kind: SCHEDULE_ADAPTER_KIND,
+  taskWakePolicy: "cohort",
 };
 
 /**
