@@ -352,9 +352,7 @@ import { evaluate } from "eve/experimental/evaluate";
 import { defineWorkflowTool, type WorkflowToolContext } from "eve/tools";
 import { z } from "zod";
 
-type Criteria = Record<"researcher" | "operator", string>;
-
-async function chooseTarget(task: string, criteria: Criteria, ctx: WorkflowToolContext) {
+async function chooseTarget(task: string, ctx: WorkflowToolContext) {
   "use step";
 
   const result = await evaluate({
@@ -364,7 +362,10 @@ async function chooseTarget(task: string, criteria: Criteria, ctx: WorkflowToolC
       route: {
         type: "choice",
         instructions: "Which specialist should handle this task?",
-        criteria,
+        criteria: {
+          researcher: ctx.agents.researcher.description,
+          operator: ctx.agents.operator.description,
+        },
       },
     },
   });
@@ -378,14 +379,7 @@ export default defineWorkflowTool({
   async execute({ task }, ctx) {
     "use workflow";
 
-    const target = await chooseTarget(
-      task,
-      {
-        researcher: ctx.agents.researcher.description,
-        operator: ctx.agents.operator.description,
-      },
-      ctx,
-    );
+    const target = await chooseTarget(task, ctx);
 
     return ctx.agent(target, { message: task });
   },
