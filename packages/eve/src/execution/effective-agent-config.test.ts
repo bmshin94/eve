@@ -14,6 +14,7 @@ describe("resolveEffectiveAgentRuntime", () => {
       },
       description: "Perform deep research.",
       limits: { sessionTimeoutMs: 120_000 },
+      tasks: { wakePolicy: "single" },
       model: { id: "anthropic/claude-opus-4.6" },
       reasoning: "high",
     });
@@ -40,6 +41,7 @@ describe("resolveEffectiveAgentRuntime", () => {
 
     expect(effective).toMatchObject({
       limits: { sessionTimeoutMs: 120_000 },
+      tasks: { wakePolicy: "single" },
       thresholdPercent: 0.75,
       turnAgent: {
         compactionModel: { id: "anthropic/claude-sonnet-4.5" },

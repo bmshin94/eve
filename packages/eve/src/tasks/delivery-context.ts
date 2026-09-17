@@ -1,3 +1,4 @@
+import type { AgentTasksDefinition } from "#shared/agent-definition.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import { markFrameworkStepInput } from "#harness/messages.js";
 import type { SessionStateMap, StepInput } from "#harness/types.js";
@@ -12,7 +13,7 @@ The latest ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists 
 
 Continue carrying out the user's request, including starting any remaining background work. When no further tool calls are needed in this turn, send one brief user-facing acknowledgement that the background work has started. Do not wait for results or report results that are not available yet. End the turn after the acknowledgement.`;
 
-export const TASK_DELIVERY_SETTLED_INSTRUCTION = `Background task reporting\nThis turn was triggered by background task activity. The accompanying ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists overlapping background tasks in the same cohort, potentially started across different user turns, all settled, with every available terminal output. Do not reply with ${EMPTY_DELIVERY_SENTINEL}. Send one user-facing response that combines their useful results.`;
+export const TASK_DELIVERY_SETTLED_INSTRUCTION = `Background task reporting\nThis turn was triggered by background task activity. The accompanying ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists the background tasks whose results are being delivered in this turn, all settled, with every available terminal output. Other background tasks may still be running. Report these results without waiting for them or repeating previously reported results. Do not reply with ${EMPTY_DELIVERY_SENTINEL}. Send one user-facing response that combines their useful results.`;
 
 type BackgroundTaskDelivery = DeliverHookPayload & {
   readonly taskDeliveryId: string;
@@ -34,10 +35,12 @@ export function markBackgroundTaskStepInput(input: StepInput): StepInput {
     : markFrameworkStepInput(input, "execution.background_task");
 }
 
-/** Groups overlapping tasks without changing the delivered task's activity root. */
+/** Projects the report group without changing the delivered task's activity root. */
 export function resolveTaskDeliveryContext(input: {
   readonly state: SessionStateMap | undefined;
   readonly taskDeliveryId: string;
+  readonly taskDeliveryIds?: readonly string[];
+  readonly wakePolicy?: AgentTasksDefinition["wakePolicy"];
 }):
   | {
       readonly context: string;
@@ -49,7 +52,12 @@ export function resolveTaskDeliveryContext(input: {
   const delivered = entries.find((entry) => input.taskDeliveryId.startsWith(`${entry.taskId}:`));
   if (delivered === undefined) return undefined;
 
-  const cohort = entries.filter((entry) => getTaskCohortId(entry) === getTaskCohortId(delivered));
+  const deliveryIds = input.taskDeliveryIds ?? [input.taskDeliveryId];
+  const cohort = entries.filter((entry) =>
+    input.wakePolicy === "single"
+      ? deliveryIds.some((id) => id.startsWith(`${entry.taskId}:`))
+      : getTaskCohortId(entry) === getTaskCohortId(delivered),
+  );
   return { ...projectTaskCohort(cohort), rootTurnId: delivered.createdByTurnId };
 }
 

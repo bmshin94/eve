@@ -518,6 +518,61 @@ describe("buffered task completion batching", () => {
   beforeEach(() => vi.mocked(routeDeliverToChildren).mockReset());
   afterEach(() => vi.mocked(routeDeliverToChildren).mockReset());
 
+  it("single wakes for a completion while its cross-turn sibling remains unfinished", async () => {
+    const input = batchingInput(2, true);
+    await input.cursor.apply({ serializedContext: { "eve.taskWakePolicy": "single" } });
+    const first = completion("task_0");
+    input.queue.enqueueDelivery(first);
+    await expect(nextTurnDelivery(input)).resolves.toMatchObject({ kind: "turn", delivery: first });
+    expect(input.queue.pendingCount).toBe(0);
+  });
+
+  it("single combines ready siblings without waiting for the remaining task", async () => {
+    const input = batchingInput(3);
+    await input.cursor.apply({ serializedContext: { "eve.taskWakePolicy": "single" } });
+    const first = completion("task_0");
+    const second = completion("task_1");
+    input.queue.enqueueDelivery(first);
+    input.queue.enqueueDelivery(first);
+    input.queue.enqueueDelivery(second);
+    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+      kind: "turn",
+      delivery: {
+        payloads: [...first.payloads, ...second.payloads],
+        taskDeliveryIds: [first.taskDeliveryId, second.taskDeliveryId],
+      },
+    });
+    expect(input.queue.pendingCount).toBe(0);
+    input.queue.enqueueDelivery(first);
+    expect(input.queue.pendingCount).toBe(0);
+  });
+
+  it("single preserves intervening user input and deferred delivery boundaries", async () => {
+    const input = batchingInput(3);
+    await input.cursor.apply({ serializedContext: { "eve.taskWakePolicy": "single" } });
+    const question = {
+      kind: "deliver",
+      payloads: [{ message: "Alice checks the status." }],
+    } as const;
+    const first = completion("task_0");
+    const second = completion("task_1");
+    input.queue.enqueueDelivery(first);
+    input.queue.enqueueDelivery(question);
+    input.queue.enqueueDelivery(second);
+    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+      kind: "turn",
+      delivery: question,
+    });
+    expect(
+      input.queue.takeNext(new Map(), { wakePolicy: "single", deferDeliveries: true }),
+    ).toBeUndefined();
+    expect(input.queue.pendingCount).toBe(2);
+    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+      kind: "turn",
+      delivery: { payloads: [...first.payloads, ...second.payloads] },
+    });
+  });
+
   it("delivers 100 buffered sibling results and their metadata in one parent turn", async () => {
     const input = batchingInput();
     const deliveries = Array.from({ length: 100 }, (_, index) => completion(`task_${index}`));

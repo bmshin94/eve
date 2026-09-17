@@ -39,7 +39,7 @@ export function resolveDeliveryPolicy(input: {
   // These runs have an explicit output consumer, so silence would violate the call contract.
   if (input.hasOutputSchema || input.isChild) return POLICIES.normal;
   if (input.taskDeliveryPhase === "pending") return POLICIES.pending;
-  // A complete cohort owes its caller the consolidated result and must not disappear silently.
+  // Delivered terminal results must not disappear silently.
   if (input.taskDeliveryPhase === "settled") return POLICIES.settled;
   // Nobody prompted a schedule-created first turn, so starting work needs no acknowledgement.
   if (input.isFirstTurn && input.hasScheduleProvenance) return POLICIES.conditional;

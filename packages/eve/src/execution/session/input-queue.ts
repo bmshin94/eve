@@ -1,6 +1,7 @@
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { jsonValuesEqual } from "#shared/json.js";
+import type { AgentTasksDefinition } from "#shared/agent-definition.js";
 import type { getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
 
 export type SessionControl = "clear" | "compact" | "expired" | "reset";
@@ -167,6 +168,7 @@ export class SessionInputQueue {
     cohorts: TaskCohorts,
     options?: {
       readonly deferDeliveries?: boolean;
+      readonly wakePolicy?: AgentTasksDefinition["wakePolicy"];
       /**
        * Attempt ids of the open authorization challenge. Callbacks for other
        * attempts are stale and dropped; once every expected attempt has
@@ -194,12 +196,20 @@ export class SessionInputQueue {
         };
       }
     }
-    const index = this.nextActionableIndex(cohorts, options?.deferDeliveries === true);
+    const index = this.nextActionableIndex(
+      cohorts,
+      options?.deferDeliveries === true,
+      options?.wakePolicy,
+    );
     if (index < 0) return undefined;
     return this.takeSelectionAt(index, cohorts, options?.freshSequence);
   }
 
-  private nextActionableIndex(cohorts: TaskCohorts, deferDeliveries: boolean): number {
+  private nextActionableIndex(
+    cohorts: TaskCohorts,
+    deferDeliveries: boolean,
+    wakePolicy: AgentTasksDefinition["wakePolicy"],
+  ): number {
     const deliveries = this.entries.filter(
       (entry): entry is QueuedDelivery => entry.kind === "delivery",
     );
@@ -219,7 +229,7 @@ export class SessionInputQueue {
       if (entry.kind === "control") return true;
       if (entry.kind === "authorization" || deferDeliveries) return false;
       const cohort = completionCohort(entry.delivery, cohorts);
-      return cohort === undefined || !pendingCohorts.has(cohort);
+      return wakePolicy === "single" || cohort === undefined || !pendingCohorts.has(cohort);
     });
   }
 
@@ -324,9 +334,17 @@ export function isSteeringDelivery(
 }
 
 function combine(entries: readonly DeliveryAdmission[]): DeliverHookPayload {
-  return entries.length === 1
-    ? entries[0]!.delivery
-    : coalesceDeliveries(entries.map(({ delivery }) => delivery));
+  if (entries.length === 1) return entries[0]!.delivery;
+  const deliveries = entries.map(({ delivery }) => delivery);
+  const taskDeliveryIds = deliveries.flatMap(
+    (delivery) =>
+      delivery.taskDeliveryIds ??
+      (delivery.taskDeliveryId === undefined ? [] : [delivery.taskDeliveryId]),
+  );
+  return {
+    ...coalesceDeliveries(deliveries),
+    taskDeliveryIds: taskDeliveryIds.length > 0 ? taskDeliveryIds : undefined,
+  };
 }
 
 function authorizationAttemptId(payload: DeliverPayload): string | undefined {

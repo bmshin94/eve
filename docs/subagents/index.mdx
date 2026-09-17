@@ -13,7 +13,29 @@ successful results await delivery. eve holds successful completion notifications
 until every task in that cohort has completed, failed, or been cancelled, then
 delivers the successful results together in one parent turn. Partial completions
 do not invoke the parent model. Work started after the cohort settles forms a new
-cohort. No configuration or debounce timer is required.
+cohort. This is the default `tasks.wakePolicy: "cohort"` behavior.
+
+To deliver independent results without waiting for unfinished siblings, set
+`tasks.wakePolicy` on the **parent** agent:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+  tasks: { wakePolicy: "single" },
+});
+```
+
+With `"single"`, a successful result can start a parent turn while other tasks
+are still running. Results from the same cohort already queued when the parent
+becomes available may share a turn; this setting does not guarantee one turn per
+task. The reporting context includes the results delivered in that turn, without
+including earlier results again. Tasks continue to run independently.
+
+The setting applies to all background tasks owned by that agent, including
+background tools and built-in, declared, and remote subagents. A declared child
+configures its own wake policy for the background work it starts.
 
 User messages, input requests, authorization events, failures, and cancellation
 are handled without waiting for the cohort. Child lifecycle events are processed

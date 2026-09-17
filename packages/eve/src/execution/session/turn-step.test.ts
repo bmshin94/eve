@@ -2535,6 +2535,32 @@ describe("turnStep", () => {
     });
   });
 
+  it.each([undefined, "cohort", "single"] as const)(
+    "persists resolved task wake policy %s for the inbox",
+    async (wakePolicy) => {
+      const bundle = createStubBundle();
+      vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+        ...bundle,
+        resolvedAgent: {
+          ...bundle.resolvedAgent,
+          config: { ...bundle.resolvedAgent.config, tasks: { wakePolicy } },
+        },
+      } as typeof bundle);
+      installSessionStoreMocks([createStubSession()]);
+      vi.mocked(createExecutionNodeStep).mockImplementation(() => async (session) => ({
+        next: { done: true, output: "ok" },
+        session,
+      }));
+      const result = await turnStep({
+        input: { kind: "deliver", payloads: [{ message: "Alice asks for a status update." }] },
+        sessionWritable: createTestWritable(),
+        serializedContext: createSerializedContext(),
+        sessionState: createStubSessionState(),
+      });
+      expect(result.serializedContext["eve.taskWakePolicy"]).toBe(wakePolicy ?? "cohort");
+    },
+  );
+
   it("marks task-owned deliveries even when task state is unavailable", async () => {
     const observedInputs: unknown[] = [];
     const observedTaskDeliveries: unknown[] = [];

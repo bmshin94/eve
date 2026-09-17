@@ -135,6 +135,27 @@ the agent-level setting for that selection. Omitting it inherits the agent setti
 
 Run `eve set --reasoning high` to update this field from the command line.
 
+## Background task results
+
+Set `tasks.wakePolicy` to choose when completed background tasks wake this agent:
+
+- `"cohort"` (default): wait for overlapping tasks to settle, then deliver their successful results together.
+- `"single"`: deliver ready results without waiting for unfinished siblings. Already-queued results from the same cohort may share a turn.
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+  tasks: { wakePolicy: "single" },
+});
+```
+
+Configure the parent that receives the results. Failures, cancellations, input
+requests, and explicit task messages remain eligible for delivery under either
+policy. See [Completion batching](./subagents#completion-batching) for cohort
+membership and delivery ordering.
+
 ## Compaction
 
 Compaction summarizes older turns as you approach the context window. It's on by default, so you only tune when it kicks in. eve adds the estimated fixed checkpoint-prompt envelope to the trigger count, so compaction starts sooner than the conversation-only estimate. Lower `thresholdPercent` to compact sooner:

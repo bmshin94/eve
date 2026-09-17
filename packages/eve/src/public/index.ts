@@ -7,6 +7,7 @@ export {
   type AgentDefinition,
   type AgentExperimentalDefinition,
   type AgentLimitsDefinition,
+  type AgentTasksDefinition,
   type AgentModelDefinition,
   type AgentModelOptionsDefinition,
   type AgentReasoningDefinition,

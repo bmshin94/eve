@@ -10,6 +10,24 @@ import { defineDynamic } from "#dynamic/definition.js";
 const FAILURE_MESSAGE = "Expected the agent config to match the public eve shape.";
 
 describe("normalizeAgentDefinition", () => {
+  it.each(["cohort", "single"])("accepts task wake policy %s", (wakePolicy) => {
+    expect(
+      normalizeAgentDefinition({ model: "test", tasks: { wakePolicy } }, FAILURE_MESSAGE).tasks,
+    ).toEqual({ wakePolicy });
+  });
+
+  it.each(["immediate", false, null, 1])("rejects invalid task wake policy %j", (wakePolicy) => {
+    expect(() =>
+      normalizeAgentDefinition({ model: "test", tasks: { wakePolicy } }, FAILURE_MESSAGE),
+    ).toThrow('"tasks.wakePolicy" must be "cohort" or "single"');
+  });
+
+  it("rejects unknown task settings", () => {
+    expect(() =>
+      normalizeAgentDefinition({ model: "test", tasks: { debounce: 1 } }, FAILURE_MESSAGE),
+    ).toThrow('Unknown key "debounce"');
+  });
+
   it("accepts provider-agnostic reasoning effort", () => {
     const definition = normalizeAgentDefinition(
       {

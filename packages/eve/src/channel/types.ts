@@ -283,6 +283,8 @@ export interface DeliverHookPayload {
    * `resumeHook` already succeeded.
    */
   readonly taskDeliveryId?: string;
+  /** All source notifications when the session queue combines task results. */
+  readonly taskDeliveryIds?: readonly string[];
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
   readonly turnPolicy?: TurnPolicy;

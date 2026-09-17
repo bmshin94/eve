@@ -101,6 +101,58 @@ describe("resolveInitiatingTaskContext", () => {
 });
 
 describe("resolveTaskDeliveryContext", () => {
+  it("single projects only the delivered results while another task is unfinished", () => {
+    const first = {
+      taskId: "task_1",
+      status: "completed",
+      metadata,
+      lastOutput: { type: "result", data: "first" },
+    } as const;
+    const second = {
+      ...first,
+      taskId: "task_2",
+      lastOutput: { type: "result", data: "second" },
+    } as const;
+    const state = taskState([
+      taskEntry("task_1", "turn_1", first),
+      { ...taskEntry("task_2", "turn_2", second), cohortId: "task_1" },
+      { ...taskEntry("task_3", "turn_3"), cohortId: "task_1" },
+    ]);
+    const result = resolveTaskDeliveryContext({
+      state,
+      taskDeliveryId: "task_2:ready:completed",
+      wakePolicy: "single",
+    });
+    expect(result?.phase).toBe("settled");
+    expect(result?.rootTurnId).toBe("turn_2");
+    expect(JSON.parse(result!.context.slice(TASK_DELIVERY_CONTEXT_LABEL.length))).toEqual({
+      tasks: [
+        { name: metadata.name, output: second.lastOutput, status: "completed", taskId: "task_2" },
+      ],
+    });
+    const batch = resolveTaskDeliveryContext({
+      state,
+      taskDeliveryId: "task_1:ready:completed",
+      wakePolicy: "single",
+      taskDeliveryIds: ["task_1:ready:completed", "task_2:ready:completed"],
+    });
+    expect(batch?.phase).toBe("settled");
+    expect(
+      JSON.parse(batch!.context.slice(TASK_DELIVERY_CONTEXT_LABEL.length)).tasks.map(
+        (task: { taskId: string }) => task.taskId,
+      ),
+    ).toEqual(["task_1", "task_2"]);
+  });
+
+  it("single keeps an advisory wake pending until the delivered task is terminal", () => {
+    const result = resolveTaskDeliveryContext({
+      state: taskState([taskEntry("task_1", "turn_1")]),
+      taskDeliveryId: "task_1:message:1",
+      wakePolicy: "single",
+    });
+    expect(result?.phase).toBe("pending");
+  });
+
   it("includes completed siblings while a cross-turn cohort is pending", () => {
     const completed = {
       lastOutput: { data: { result: "first" }, type: "result" },
