@@ -42,5 +42,6 @@ export {
   type WorkflowToolContext,
   type WorkflowToolDefinition,
   type AgentInput,
+  type WorkflowAgentMetadata,
 } from "#tools/workflow-definition.js";
 export type { ToolInputRequest, ToolInputResponse } from "#tools/definition.js";

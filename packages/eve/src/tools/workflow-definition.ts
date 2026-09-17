@@ -64,6 +64,10 @@ type JsonSchemaOutput<TSchema> = TSchema extends { readonly const: infer TValue 
                 ? null
                 : JsonValue;
 
+export interface WorkflowAgentMetadata {
+  readonly description: string;
+}
+
 interface WorkflowAgent {
   <const TOutputSchema extends JsonObject>(
     target: string,
@@ -80,8 +84,10 @@ export type WorkflowToolContext = Pick<
   ToolContext,
   "abortSignal" | "callId" | "session" | "toolName" | "getToken" | "requireAuth"
 > & {
-  /** Invoke a visible subagent by its model-visible name. */
+  /** Invoke an agent by its path-derived name. */
   agent: WorkflowAgent;
+  /** Metadata for agents callable by this workflow, including hidden agents. */
+  agents: Readonly<Record<string, WorkflowAgentMetadata>>;
   /** Ask the human on the session's channel; awaiting the answer suspends the run. */
   ask(request: ToolInputRequest): PromiseLike<ToolInputResponse>;
 };

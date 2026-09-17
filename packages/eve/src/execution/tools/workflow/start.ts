@@ -33,6 +33,7 @@ export async function startWorkflowToolRun(
 
 /** Starts one durable workflow task and records it on the owning session. */
 export async function startWorkflowTask(input: {
+  readonly agents: WorkflowToolRunInput["agents"];
   readonly auth: SessionAuth["current"];
   readonly batchEvent: {
     readonly sequence: number;
@@ -48,6 +49,7 @@ export async function startWorkflowTask(input: {
   const { task, batchEvent, session } = input;
   try {
     const started = await startWorkflowToolRun({
+      agents: input.agents,
       callId: task.callId,
       executeInput: task.executeInput,
       input: task.input,

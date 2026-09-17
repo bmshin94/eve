@@ -6,6 +6,7 @@ import { runStep } from "#context/run-step.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { isAuthorizationSignal } from "#harness/authorization.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
+import { resolveWorkflowAgentMetadata } from "#execution/tools/subagent/metadata.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import { isTurnCancellation } from "#harness/turn-cancellation.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
@@ -518,6 +519,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       parentContinuationToken: sessionCommandHookToken(this.initialSession.sessionId),
       taskInboxToken: task.taskInboxToken,
       workflow: {
+        agents: resolveWorkflowAgentMetadata(input.ctx),
         callId: taskInput.callId,
         executeInput: workflow.executeInput?.(workflowInput),
         input: workflowInput,

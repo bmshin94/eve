@@ -18,6 +18,8 @@ import type { ToolContext } from "#tools/definition.js";
 import { createTaskMessage, type TaskExec } from "#tools/task.js";
 
 export interface WorkflowBodyDefinition {
+  /** Snapshot added for new runs; absent only when resuming an older durable payload. */
+  readonly agents?: WorkflowToolContext["agents"];
   readonly callId: string;
   readonly executeInput?: JsonValue;
   readonly input: JsonObject;
@@ -140,6 +142,14 @@ function createWorkflowBodyContext(
   const ctx: ToolContext & WorkflowToolContext = {
     agent: ((target: string, agentInput: AgentInput) =>
       agent(ctx, target, agentInput)) as WorkflowToolContext["agent"],
+    agents: Object.freeze(
+      Object.fromEntries(
+        Object.entries(input.agents ?? {}).map(([name, metadata]) => [
+          name,
+          Object.freeze({ ...metadata }),
+        ]),
+      ),
+    ),
     ask: (request) => ask(ctx, request),
     abortSignal: signal,
     callId: input.callId,

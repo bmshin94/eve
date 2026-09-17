@@ -5,6 +5,7 @@ import { defineTool } from "#tools/definition.js";
 import {
   defineWorkflowTool,
   isWorkflowToolDefinition,
+  type WorkflowAgentMetadata,
   type WorkflowToolContext,
 } from "#tools/workflow-definition.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
@@ -17,6 +18,7 @@ describe("defineWorkflowTool", () => {
       async execute(input, ctx) {
         expectTypeOf(input).toEqualTypeOf<{ service: string }>();
         expectTypeOf(ctx).toEqualTypeOf<WorkflowToolContext>();
+        expectTypeOf(ctx.agents.researcher).toEqualTypeOf<WorkflowAgentMetadata | undefined>();
         const review = ctx.agent("researcher", {
           message: "Review the deployment.",
           outputSchema: {
@@ -78,6 +80,8 @@ describe("defineWorkflowTool", () => {
       async execute(_input, ctx) {
         // @ts-expect-error agent is available only on WorkflowToolContext.
         void ctx.agent;
+        // @ts-expect-error agents is available only on WorkflowToolContext.
+        void ctx.agents;
         // @ts-expect-error ask is available only on WorkflowToolContext.
         void ctx.ask;
         return 1;

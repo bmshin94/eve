@@ -49,6 +49,8 @@ import { buildSubagentRunInput } from "#subagents/tool.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { isTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
+import { resolveWorkflowAgentMetadata } from "#execution/tools/subagent/metadata.js";
+import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 
 export type DispatchPlanEntry =
   | { readonly kind: "task-control"; readonly action: RuntimeToolCallActionRequest }
@@ -100,6 +102,7 @@ export interface PreparedCoordinationDispatch<PlanEntry = DispatchPlanEntry> {
   readonly plan: readonly PlanEntry[];
   readonly session: RuntimeSession;
   readonly sessionState: DurableSessionState;
+  readonly workflowAgents: Readonly<Record<string, WorkflowAgentMetadata>>;
 }
 
 /**
@@ -238,6 +241,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     sandboxSessionId,
     serializedContext: input.serializedContext,
     session,
+    workflowAgents: resolveWorkflowAgentMetadata(ctx),
   };
 }
 

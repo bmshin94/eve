@@ -41,6 +41,7 @@ export async function dispatchCoordinationStep(
   for (const entry of prepared.plan) {
     if (entry.kind === "workflow-task") {
       const started = await startWorkflowTask({
+        agents: prepared.workflowAgents,
         auth: prepared.auth,
         batchEvent: batch.event,
         initiatorAuth: prepared.initiatorAuth,

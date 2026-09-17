@@ -2,6 +2,7 @@ import type { SessionContext } from "#context/session-context.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#tools/task.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
+import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 
 export type WorkflowToolRunSessionContext = SessionContext["session"];
 
@@ -29,6 +30,7 @@ export function readWorkflowToolExecutorAddress(
 }
 
 export interface WorkflowToolRunInput {
+  readonly agents: Readonly<Record<string, WorkflowAgentMetadata>>;
   readonly callId: string;
   readonly execution?: "background" | "blocking";
   readonly executeInput?: JsonValue;
