@@ -1,7 +1,7 @@
 import {
   getInstrumentationRuntime,
   type InstrumentationRuntime,
-} from "#harness/instrumentation/runtime.js";
+} from "#instrumentation/runtime.js";
 import { installInstrumentationRuntime } from "#tracing/install-instrumentation-runtime.js";
 import { createLocalTracesProcessor, resolveLocalTracesContent } from "#tracing/local-traces.js";
 import {
@@ -11,9 +11,8 @@ import {
   type TraceCapturePolicy,
 } from "#tracing/otel-declaration.js";
 
-/** Zero-config local tracing keeps unclassified HTTP/TUI sessions observable. @internal */
-export const localTracePolicy: TraceCapturePolicy = ({ audience }) =>
-  audience === "public" || audience === "unknown";
+/** Zero-config local tracing admits every session in the development worker. @internal */
+export const localTracePolicy: TraceCapturePolicy = () => true;
 
 /** Installs the zero-config local OTel runtime once in an `eve dev` worker. */
 export function installLocalInstrumentationRuntime(input: {

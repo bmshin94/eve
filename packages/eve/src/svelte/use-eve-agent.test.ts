@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useEveAgent } from "#svelte/use-eve-agent.js";
-import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
+import {
+  EVE_MESSAGE_STREAM_VERSION,
+  EVE_SESSION_ID_HEADER,
+  EVE_STREAM_VERSION_HEADER,
+} from "#protocol/message.js";
 import {
   createMessageCompletedEvent,
   createMessageReceivedEvent,
@@ -31,12 +35,18 @@ function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[
         controller.close();
       },
     }),
+    {
+      headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+    },
   );
 }
 
-function createBoundedStreamResponse(events: readonly UnstampedMessageStreamEvent[]): Response {
+function createBoundedStreamResponse(
+  events: readonly UnstampedMessageStreamEvent[],
+  tailIndex = events.length - 1,
+): Response {
   const response = createEagerStreamResponse(events);
-  response.headers.set("x-eve-stream-tail-index", String(events.length - 1));
+  response.headers.set("x-eve-stream-tail-index", String(tailIndex));
   return response;
 }
 
@@ -96,7 +106,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(createBoundedStreamResponse(events))
-      .mockResolvedValueOnce(createEagerStreamResponse([]));
+      .mockResolvedValueOnce(createBoundedStreamResponse([], events.length - 1));
     const seenEvents: UnstampedMessageStreamEvent[] = [];
 
     useEveAgent({

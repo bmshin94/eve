@@ -1,6 +1,7 @@
 import type { FilePart, TextPart, UserContent } from "ai";
 
 import type {
+  ActivityObserverConfig,
   SessionAuthContext,
   SessionCallback,
   SessionCapabilities,
@@ -8,13 +9,20 @@ import type {
 } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
+import {
+  parseActivityObserverField,
+  validateActivityObserverBinding,
+} from "#eve-channel/activity-observer-request.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import {
   EVE_MESSAGE_STREAM_CONTENT_TYPE,
   EVE_MESSAGE_STREAM_FORMAT,
   EVE_MESSAGE_STREAM_VERSION,
   EVE_SESSION_ID_HEADER,
+  EVE_STREAM_CONTROL_VERSION,
+  EVE_STREAM_CONTROL_VERSION_QUERY,
   EVE_STREAM_FORMAT_HEADER,
+  EVE_STREAM_LEASE_ENDED_CONTROL,
   EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
 } from "#protocol/message.js";
@@ -27,7 +35,11 @@ import { isInputResponse, type ValidatedInputResponse } from "#shared/input.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { RunMode } from "#shared/run-mode.js";
 
+const SESSION_STREAM_HEARTBEAT_MS = 10_000;
+const SESSION_STREAM_LEASE_MS = 60_000;
+
 interface ParsedCreateBody {
+  activityObserver?: ActivityObserverConfig;
   callback?: SessionCallback;
   capabilities?: SessionCapabilities;
   message: string | UserContent;
@@ -76,6 +88,13 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
   const capabilities = parseCapabilitiesField(payload.capabilities);
   if (capabilities instanceof Response) return capabilities;
 
+  const activityObserver = parseActivityObserverField(payload.activityObserver);
+  if (activityObserver instanceof Response) return activityObserver;
+  if (activityObserver !== undefined) {
+    const observerRejection = validateActivityObserverBinding(activityObserver, callback);
+    if (observerRejection !== undefined) return observerRejection;
+  }
+
   const mode = parseModeField(payload.mode);
   if (mode instanceof Response) return mode;
 
@@ -98,6 +117,7 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
   }
 
   const result: ParsedCreateBody = {
+    activityObserver,
     callback,
     capabilities,
     message,
@@ -110,6 +130,7 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
 }
 
 interface ParsedSessionMessageBody {
+  activityObserver?: ActivityObserverConfig;
   callback?: SessionCallback;
   message?: string | UserContent;
   inputResponses?: readonly ValidatedInputResponse[];
@@ -128,6 +149,12 @@ export function parseSessionMessageBody(
   if (message instanceof Response) return message;
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
+  const activityObserver = parseActivityObserverField(payload.activityObserver);
+  if (activityObserver instanceof Response) return activityObserver;
+  if (activityObserver !== undefined) {
+    const observerRejection = validateActivityObserverBinding(activityObserver, callback);
+    if (observerRejection !== undefined) return observerRejection;
+  }
   const inputResponses = parseInputResponses(payload.inputResponses);
   if (inputResponses instanceof Response) return inputResponses;
   const context = parseClientContextField(payload.clientContext);
@@ -154,11 +181,20 @@ export function parseSessionMessageBody(
     );
   }
 
-  return { callback, message, inputResponses, context, outputSchema, turnPolicy };
+  return {
+    activityObserver,
+    callback,
+    message,
+    inputResponses,
+    context,
+    outputSchema,
+    turnPolicy,
+  };
 }
 
 interface ParsedCancelTurnBody {
   taskId?: string;
+  tasks?: boolean;
   turnId?: string;
 }
 
@@ -170,9 +206,16 @@ export async function parseCancelTurnBody(req: Request): Promise<ParsedCancelTur
 
   const turnId = payload.turnId;
   const taskId = payload.taskId;
+  const tasks = payload.tasks;
   if (turnId !== undefined && (typeof turnId !== "string" || turnId.length === 0)) {
     return Response.json(
       { error: "Expected 'turnId' to be a non-empty string.", ok: false },
+      { status: 400 },
+    );
+  }
+  if (tasks !== undefined && typeof tasks !== "boolean") {
+    return Response.json(
+      { error: "Expected 'tasks' to be a boolean.", ok: false },
       { status: 400 },
     );
   }
@@ -184,6 +227,7 @@ export async function parseCancelTurnBody(req: Request): Promise<ParsedCancelTur
   }
   const result: ParsedCancelTurnBody = {};
   if (typeof taskId === "string") result.taskId = taskId;
+  if (typeof tasks === "boolean") result.tasks = tasks;
   if (typeof turnId === "string") result.turnId = turnId;
   return result;
 }
@@ -272,6 +316,11 @@ export async function createSessionStreamResponse(
   try {
     const tailIndex = includeTailIndex ? await session.getStreamTailIndex() : undefined;
     const events = await session.getEventStream({ startIndex });
+    const controlVersion =
+      new URL(request.url).searchParams.get(EVE_STREAM_CONTROL_VERSION_QUERY) ===
+      EVE_STREAM_CONTROL_VERSION
+        ? EVE_STREAM_CONTROL_VERSION
+        : undefined;
     const headers = new Headers({
       "cache-control": "no-store, no-transform",
       "content-type": EVE_MESSAGE_STREAM_CONTENT_TYPE,
@@ -284,7 +333,12 @@ export async function createSessionStreamResponse(
       headers.set(EVE_STREAM_TAIL_INDEX_HEADER, String(tailIndex));
     }
     return new Response(
-      serializeAsNdjson(events, request.signal, streamEventLimit(startIndex, tailIndex)),
+      serializeAsNdjson(
+        events,
+        request.signal,
+        streamEventLimit(startIndex, tailIndex),
+        controlVersion !== undefined,
+      ),
       { headers },
     );
   } catch {
@@ -494,15 +548,6 @@ function parseInputResponses(
   return inputResponses;
 }
 
-export function mergeContext(
-  existing: readonly string[] | undefined,
-  added: readonly string[] | undefined,
-): readonly string[] | undefined {
-  if (existing === undefined) return added;
-  if (added === undefined) return existing;
-  return [...existing, ...added];
-}
-
 const CLIENT_CONTEXT_PREFIX = "Client context:\n";
 
 function parseClientContextField(value: unknown): string[] | Response | undefined {
@@ -586,20 +631,69 @@ function serializeAsNdjson(
   events: ReadableStream<unknown>,
   signal: AbortSignal,
   eventLimit?: number,
+  leased = false,
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   let eventCount = 0;
+  let heartbeat: ReturnType<typeof setTimeout> | undefined;
+  let lease: ReturnType<typeof setTimeout> | undefined;
+
+  const clearTimers = () => {
+    clearTimeout(heartbeat);
+    clearTimeout(lease);
+    heartbeat = undefined;
+    lease = undefined;
+  };
+  const scheduleHeartbeat = (controller: TransformStreamDefaultController<Uint8Array>) => {
+    clearTimeout(heartbeat);
+    heartbeat = setTimeout(() => {
+      try {
+        controller.enqueue(encoder.encode("\n"));
+        scheduleHeartbeat(controller);
+      } catch {
+        clearTimers();
+      }
+    }, SESSION_STREAM_HEARTBEAT_MS);
+  };
+  const startLease = (controller: TransformStreamDefaultController<Uint8Array>) => {
+    scheduleHeartbeat(controller);
+    lease = setTimeout(() => {
+      clearTimers();
+      try {
+        controller.enqueue(encoder.encode(`${JSON.stringify(EVE_STREAM_LEASE_ENDED_CONTROL)}\n`));
+        controller.terminate();
+      } catch {
+        // The response was cancelled while the lease callback was already queued.
+      }
+    }, SESSION_STREAM_LEASE_MS);
+  };
+
   const transform = new TransformStream<unknown, Uint8Array>({
     start(controller) {
       controller.enqueue(encoder.encode("\n"));
-      if (eventLimit === 0) controller.terminate();
+      if (eventLimit === 0) {
+        controller.terminate();
+      } else if (leased) {
+        startLease(controller);
+      }
     },
     transform(event, controller) {
       controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
       eventCount += 1;
-      if (eventCount === eventLimit) controller.terminate();
+      if (eventCount === eventLimit) {
+        clearTimers();
+        controller.terminate();
+      } else if (leased) {
+        scheduleHeartbeat(controller);
+      }
+    },
+    flush() {
+      clearTimers();
     },
   });
-  void events.pipeTo(transform.writable, { signal }).catch(() => {});
+  void events
+    .pipeTo(transform.writable, { signal })
+    .catch(() => {})
+    .finally(clearTimers);
   return transform.readable;
 }

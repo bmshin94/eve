@@ -13,20 +13,29 @@ import {
   trace as runtimeTrace,
 } from "#compiled/@opentelemetry/api/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
+import { createAiSdkHookBridge } from "#instrumentation/ai-sdk-hook-bridge.js";
 import { listLocalTraces } from "#tracing/local-trace-reader.js";
-import type { InstrumentationAttemptScope } from "#harness/instrumentation/lifecycle.js";
+import type { InstrumentationAttemptScope } from "#instrumentation/lifecycle.js";
 import {
   actionIdempotencyKey,
   attemptIdempotencyKey,
   sessionIdempotencyKey,
   turnIdempotencyKey,
-} from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
 import { installLocalInstrumentationRuntime } from "#tracing/local-instrumentation-runtime.js";
 import { LocalTraceSpanProcessor } from "#tracing/local-trace-span-processor.js";
 
 const temporaryDirectories: string[] = [];
 const require = createRequire(import.meta.url);
+
+const traceContext = (audience: "public" | "private" | "unknown") => ({
+  agentName: "weather",
+  audience,
+  channel: { kind: "http" as const },
+  environment: "production" as const,
+  mode: "conversation" as const,
+  principalType: "anonymous",
+});
 
 afterEach(async () => {
   await Promise.all(
@@ -59,16 +68,17 @@ describe("local instrumentation runtime", () => {
     };
     const delivery = runtimeTrace.getTracer("workflow").startSpan("workflow.delivery");
     const activeContext = runtimeTrace.setSpan(COMPILED_ROOT_CONTEXT, delivery);
+    const hooks = runtime.hooks.forTrace!(traceContext("unknown"));
 
     const exerciseRuntime = async () => {
-      await runtime.hooks.publish({
+      await hooks.publish({
         agentName: "weather",
         idempotencyKey: sessionIdempotencyKey("session-1"),
         rootSessionId: "session-1",
         sessionId: "session-1",
         type: "session.started",
       });
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
         rootSessionId: "session-1",
         sequence: 0,
@@ -76,7 +86,7 @@ describe("local instrumentation runtime", () => {
         turnId: "turn-1",
         type: "turn.started",
       });
-      const bridge = createAiSdkHookBridge(scope, runtime.hooks, runtime.runInContext);
+      const bridge = createAiSdkHookBridge(scope, hooks, runtime.runInContext);
       Reflect.apply(bridge.onStart!, bridge, [
         {
           callId: "call-1",
@@ -115,7 +125,7 @@ describe("local instrumentation runtime", () => {
         },
       ]);
       const actionKey = actionIdempotencyKey("session-1", "turn-1", "tool-1");
-      await runtime.hooks.publish({
+      await hooks.publish({
         callId: "tool-1",
         idempotencyKey: actionKey,
         input: {},
@@ -149,26 +159,26 @@ describe("local instrumentation runtime", () => {
           toolOutput: { output: { temperature: 72 }, type: "tool-result" },
         },
       ]);
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey: actionKey,
         outcome: "completed",
         output: { output: { temperature: 72 }, type: "result" },
         scope,
         type: "action.completed",
       });
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey: attemptIdempotencyKey(scope),
         scope,
         type: "step.attempt.completed",
       });
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
         sessionId: "session-1",
         turnId: "turn-1",
         type: "turn.completed",
       });
       // Settling the turn emits the turn span with the pre-allocated id.
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey: sessionIdempotencyKey("session-1"),
         sessionId: "session-1",
         turnId: "turn-1",
@@ -196,16 +206,33 @@ describe("local instrumentation runtime", () => {
     );
     const spans = spanGroups.flat();
     expect(formatTraceTree(spans)).toEqual([
-      "agent.session",
-      "  agent.turn",
-      "    agent.step",
-      "      agent.action",
-      "        ai.toolCall",
-      "          user.tool-work",
-      "      ai.streamText",
-      "        chat model-1",
-      "          user.model-work",
+      "invoke_agent weather",
+      "  agent.step",
+      "    agent.action",
+      "      execute_tool weather",
+      "        user.tool-work",
+      "    chat model-1",
+      "      user.model-work",
     ]);
+    for (const exported of spans.filter((span) => !span.name.startsWith("user."))) {
+      expect(exported.attributes).toEqual(
+        expect.arrayContaining([
+          { key: "resource.name", value: { stringValue: exported.name } },
+          {
+            key: "operation.name",
+            value: {
+              stringValue: exported.name.startsWith("invoke_agent ")
+                ? "invoke_agent"
+                : exported.name.startsWith("execute_tool ")
+                  ? "execute_tool"
+                  : exported.name.startsWith("chat ")
+                    ? "chat"
+                    : exported.name,
+            },
+          },
+        ]),
+      );
+    }
     expect(span(spans, "agent.step").links).toEqual([
       expect.objectContaining({
         attributes: expect.arrayContaining([
@@ -220,7 +247,7 @@ describe("local instrumentation runtime", () => {
     ]);
     const listed = await listLocalTraces(appRoot);
     expect(listed).toHaveLength(1);
-    expect(listed[0]).toMatchObject({ sessionId: "session-1", traceId });
+    expect(listed[0]).toMatchObject({ conversationId: "session-1", traceId });
   });
 
   it("keeps segments from overlapping worker writers", async () => {
@@ -251,6 +278,7 @@ describe("local instrumentation runtime", () => {
 });
 
 interface OtlpSpan {
+  readonly attributes: ReadonlyArray<{ readonly key: string; readonly value: unknown }>;
   readonly links?: ReadonlyArray<{
     readonly attributes: ReadonlyArray<{ readonly key: string; readonly value: unknown }>;
     readonly spanId: string;

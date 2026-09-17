@@ -1,10 +1,14 @@
 import { createElement } from "react";
-import { act, create } from "react-test-renderer";
+import { act, create as createRenderer } from "react-test-renderer";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useEveAgent, type UseEveAgentHelpers } from "#react/use-eve-agent.js";
 import type { EveMessageData } from "#client/message-reducer.js";
-import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
+import {
+  EVE_MESSAGE_STREAM_VERSION,
+  EVE_SESSION_ID_HEADER,
+  EVE_STREAM_VERSION_HEADER,
+} from "#protocol/message.js";
 import {
   createMessageCompletedEvent,
   createMessageReceivedEvent,
@@ -39,6 +43,9 @@ function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[
         controller.close();
       },
     }),
+    {
+      headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+    },
   );
 }
 
@@ -124,8 +131,22 @@ function completedTurnData(input: {
   };
 }
 
-afterEach(() => {
-  vi.restoreAllMocks();
+const renderers: ReturnType<typeof createRenderer>[] = [];
+
+function create(...args: Parameters<typeof createRenderer>) {
+  const renderer = createRenderer(...args);
+  renderers.push(renderer);
+  return renderer;
+}
+
+afterEach(async () => {
+  try {
+    await act(async () => {
+      for (const renderer of renderers.splice(0)) renderer.unmount();
+    });
+  } finally {
+    vi.restoreAllMocks();
+  }
 });
 
 describe("useEveAgent", () => {
@@ -165,6 +186,9 @@ describe("useEveAgent", () => {
             streamSignal?.addEventListener("abort", () => controller.error(createAbortError()));
           },
         }),
+        {
+          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+        },
       );
     });
 
@@ -411,9 +435,9 @@ describe("useEveAgent", () => {
       await sendPromise;
     });
 
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/eve/agents/support/eve/v1/session");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/eve/support/v1/session");
     expect(fetchMock.mock.calls[1]?.[0]).toBe(
-      "/eve/agents/support/eve/v1/session/session_1/stream",
+      "/eve/support/v1/session/session_1/stream?streamControlVersion=1",
     );
   });
 
@@ -679,7 +703,7 @@ describe("useEveAgent", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(createBoundedStreamResponse([], events.length - 1))
-      .mockResolvedValueOnce(createEagerStreamResponse([]));
+      .mockResolvedValueOnce(createBoundedStreamResponse([], events.length - 1));
     let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
     const statuses: string[] = [];
 
@@ -695,6 +719,8 @@ describe("useEveAgent", () => {
 
     await act(async () => {
       create(createElement(TestComponent));
+    });
+    await act(async () => {
       await vi.waitFor(() => expect(helpers?.status).toBe("ready"));
     });
 

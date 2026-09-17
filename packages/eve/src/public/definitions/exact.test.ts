@@ -18,25 +18,34 @@ import {
   defineDynamic as defineDynamicInstructions,
   defineInstructions,
 } from "#public/definitions/instructions.js";
-import { defineInstrumentation } from "#public/definitions/instrumentation.js";
+import {
+  defineInstrumentation,
+  type ProviderDefinition,
+} from "#public/definitions/instrumentation.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
 import { defineSkill } from "#public/definitions/skill.js";
 import {
   defineTool,
-  type TaskReceipt,
   type TaskExec,
+  type TaskReceipt,
   type ToolDefinition,
 } from "#public/tools/index.js";
-import { experimental_workflow } from "#public/tools/workflow.js";
 
 describe("definition helper exact inputs", () => {
   it("preserves literal inference for valid definitions", () => {
     const agent = defineAgent({
       description: "type-test",
+      experimental: {
+        workflow: {
+          modelCallsPerStep: 4,
+          retention: 0,
+        },
+      },
       limits: {
         maxInputTokensPerSession: 200_000,
         maxOutputTokensPerSession: 20_000,
+        maxTokenCostUsdPerSession: 1.5,
         sessionTimeoutMs: 86_400_000,
       },
       model: "anthropic/claude-sonnet-5",
@@ -48,15 +57,28 @@ describe("definition helper exact inputs", () => {
     });
 
     expect(agent.description).toBe("type-test");
+    expect(agent.experimental.workflow.modelCallsPerStep).toBe(4);
+    expect(agent.experimental.workflow.retention).toBe(0);
     expect(agent.limits.maxInputTokensPerSession).toBe(200_000);
     expect(agent.limits.maxOutputTokensPerSession).toBe(20_000);
+    expect(agent.limits.maxTokenCostUsdPerSession).toBe(1.5);
     expect(agent.limits.sessionTimeoutMs).toBe(86_400_000);
-    expect(experimental_workflow({ maxSubagents: 6 }).maxSubagents).toBe(6);
     expect(schedule.cron).toBe("0 9 * * *");
   });
 
   it("accepts async-generator tool executors", () => {
     const streamedTool = defineTool({
+      label: {
+        start: () => "Build report",
+        complete(_input, output) {
+          expectTypeOf(output.phase).toEqualTypeOf<string>();
+          return `Report ${output.phase}`;
+        },
+        delta(_input, partial) {
+          expectTypeOf(partial.phase).toEqualTypeOf<string>();
+          return partial.phase;
+        },
+      },
       description: "Stream report progress.",
       inputSchema: { type: "object" },
       async *execute() {
@@ -75,6 +97,7 @@ describe("definition helper exact inputs", () => {
 
   it("preserves ordinary async tool executor return types", () => {
     const ordinaryTool = defineTool({
+      label: { start: (input) => `React with ${input.reaction}` },
       description: "React to a message.",
       inputSchema: z.object({ reaction: z.string() }),
       async execute(input) {
@@ -92,20 +115,19 @@ describe("definition helper exact inputs", () => {
       description: "Start a durable export.",
       execution: "background",
       inputSchema: z.object({ jobId: z.string() }),
-      execute(input, _ctx, task) {
+      async *execute(input, _ctx, task) {
         expectTypeOf(task).toEqualTypeOf<TaskExec>();
-        expectTypeOf(task.binding.taskId).toEqualTypeOf<string>();
-        return task.delegated({
-          executor: { data: { jobId: input.jobId }, kind: "export" },
-          receipt: { jobId: input.jobId },
-        });
+        expectTypeOf(task.taskId).toEqualTypeOf<string>();
+        expectTypeOf(task).not.toHaveProperty("delegated");
+        yield { jobId: input.jobId };
+        return { jobId: input.jobId };
       },
     });
 
     expectTypeOf(backgroundTool.execution).toEqualTypeOf<"background">();
-    expectTypeOf<Parameters<NonNullable<typeof backgroundTool.toModelOutput>>[0]>().toEqualTypeOf<
-      TaskReceipt<{ jobId: string }>
-    >();
+    expectTypeOf<
+      Parameters<NonNullable<typeof backgroundTool.toModelOutput>>[0]
+    >().toEqualTypeOf<TaskReceipt>();
     expect(backgroundTool.execution).toBe("background");
   });
 
@@ -128,16 +150,6 @@ describe("definition helper exact inputs", () => {
 });
 
 function typeOnlyFixtures(): void {
-  defineTool({
-    description: "Invalid streaming background tool.",
-    // @ts-expect-error Background executors settle once; streamed output is unsupported.
-    execution: "background",
-    inputSchema: { type: "object" },
-    async *execute() {
-      yield { status: "working" };
-    },
-  });
-
   defineDynamic({
     // @ts-expect-error defineDynamic is resolver-only.
     fallback: "anthropic/claude-sonnet-5",
@@ -226,15 +238,10 @@ function typeOnlyFixtures(): void {
 
   defineAgent({
     limits: {
-      // @ts-expect-error Workflow fan-out is configured by experimental_workflow.
+      // @ts-expect-error Generated-program fan-out is configured by the workflow factory.
       maxSubagents: 6,
     },
     model: "anthropic/claude-sonnet-5",
-  });
-
-  experimental_workflow({
-    // @ts-expect-error Workflow maxSubagents must be a number.
-    maxSubagents: "6",
   });
 
   const agentWithName = {
@@ -304,6 +311,9 @@ function typeOnlyFixtures(): void {
       },
     },
   });
+
+  const providerWithCapture: ProviderDefinition = { capture: "content" };
+  void providerWithCapture;
 
   defineInstrumentation({
     // @ts-expect-error Instrumentation event hooks are authored through `events`.

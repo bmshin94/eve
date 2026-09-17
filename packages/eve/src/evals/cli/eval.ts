@@ -58,7 +58,7 @@ export async function runEvalCommand(
   logger: EvalCliLogger,
   appRoot: string = process.cwd(),
 ): Promise<void> {
-  loadDevelopmentEnvironmentFiles(appRoot);
+  await loadDevelopmentEnvironmentFiles(appRoot);
 
   const requestedEvalIds = evalIds.length > 0 ? evalIds : undefined;
   const discovered = await discoverAndImportEvals(appRoot, requestedEvalIds);
@@ -219,7 +219,33 @@ export async function runEvalCommand(
   }
 
   const exitCode = typeof process.exitCode === "number" ? process.exitCode : 0;
+  await flushStandardStreams();
   process.exit(exitCode);
+}
+
+async function flushStandardStreams(): Promise<void> {
+  await Promise.all([flushStream(process.stdout), flushStream(process.stderr)]);
+}
+
+async function flushStream(stream: NodeJS.WriteStream): Promise<void> {
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      setImmediate(() => {
+        stream.off("error", settle);
+        resolve();
+      });
+    };
+
+    stream.once("error", settle);
+    try {
+      stream.write("", settle);
+    } catch {
+      settle();
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------

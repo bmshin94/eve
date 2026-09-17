@@ -13,6 +13,7 @@ import { resolveChannelDefinition } from "#runtime/resolve-channel.js";
 export { ResolveAgentError } from "#runtime/resolve-helpers.js";
 
 import { resolveConnectionDefinition } from "#runtime/resolve-connection.js";
+import { resolveDynamicConnectionDefinition } from "#runtime/resolve-dynamic-connection.js";
 import { resolveHookDefinition } from "#runtime/resolve-hook.js";
 import { createResolvedModuleSourceRef } from "#runtime/resolve-helpers.js";
 import { resolveSandboxDefinition } from "#runtime/resolve-sandbox.js";
@@ -66,6 +67,11 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
       ),
     ),
   );
+  const resolvedDynamicConnectionResolvers = await Promise.all(
+    input.manifest.dynamicConnections.map((definition) =>
+      resolveDynamicConnectionDefinition(definition, input.moduleMap, input.nodeId),
+    ),
+  );
   const resolvedDynamicInstructionsResolvers = await Promise.all(
     (input.manifest.dynamicInstructions ?? []).map((def) =>
       resolveDynamicInstructionsDefinition(def, input.moduleMap, input.nodeId),
@@ -111,11 +117,7 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
   const resolvedAgent: ResolvedAgent = {
     channels: resolvedChannels,
     connections: resolvedConnections,
-    workflowTool:
-      input.manifest.workflowTool === undefined
-        ? undefined
-        : { maxSubagents: input.manifest.workflowTool.maxSubagents },
-    webSearchProvider: input.manifest.webSearchProvider,
+    dynamicConnectionResolvers: resolvedDynamicConnectionResolvers,
     dynamicInstructionsResolvers: resolvedDynamicInstructionsResolvers,
     dynamicSkillResolvers: resolvedDynamicSkillResolvers,
     dynamicToolResolvers: resolvedDynamicToolResolvers,
@@ -182,6 +184,7 @@ function createResolvedAgentConfig(
 ): NonNullable<ResolvedAgent["config"]> {
   const config: {
     compaction?: NonNullable<ResolvedAgent["config"]>["compaction"];
+    defaultTools?: boolean;
     experimental?: NonNullable<ResolvedAgent["config"]>["experimental"];
     name: string;
     outputSchema?: NonNullable<ResolvedAgent["config"]>["outputSchema"];
@@ -191,6 +194,10 @@ function createResolvedAgentConfig(
   } = {
     name: manifest.config.name,
   };
+
+  if (manifest.config.defaultTools !== undefined) {
+    config.defaultTools = manifest.config.defaultTools;
+  }
 
   if (manifest.config.compaction !== undefined) {
     const compaction: {
@@ -231,11 +238,14 @@ function createResolvedAgentConfig(
   if (manifest.config.experimental !== undefined) {
     config.experimental = {
       instrumentationProviders: manifest.config.experimental.instrumentationProviders,
-      tasks: manifest.config.experimental.tasks,
       workflow:
         manifest.config.experimental.workflow === undefined
           ? undefined
-          : { world: manifest.config.experimental.workflow.world },
+          : {
+              modelCallsPerStep: manifest.config.experimental.workflow.modelCallsPerStep,
+              retention: manifest.config.experimental.workflow.retention,
+              world: manifest.config.experimental.workflow.world,
+            },
     };
   }
 
@@ -255,6 +265,7 @@ function createResolvedAgentConfig(
     config.limits = {
       maxInputTokensPerSession: manifest.config.limits.maxInputTokensPerSession,
       maxOutputTokensPerSession: manifest.config.limits.maxOutputTokensPerSession,
+      maxTokenCostUsdPerSession: manifest.config.limits.maxTokenCostUsdPerSession,
       sessionTimeoutMs: manifest.config.limits.sessionTimeoutMs,
     };
   }

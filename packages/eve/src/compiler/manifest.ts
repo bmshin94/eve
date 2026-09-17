@@ -20,15 +20,16 @@ import type {
   SkillPackageSourceRef,
 } from "#shared/source-ref.js";
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
-import type {
-  InternalAgentDefinition,
-  InternalAgentModelDefinition,
-  InternalAgentCompactionDefinition,
-  AgentBuildDefinition,
-  ModelRouting,
+import {
+  AGENT_WORKFLOW_RETENTION_VALUES,
+  type InternalAgentDefinition,
+  type InternalAgentModelDefinition,
+  type InternalAgentCompactionDefinition,
+  type AgentBuildDefinition,
+  type ModelRouting,
 } from "#shared/agent-definition.js";
 import type { InternalToolDefinition } from "#tools/definition.js";
-import type { WebSearchProvider } from "#shared/web-search.js";
+import type { CompiledToolBehavior } from "#tools/behavior.js";
 import type {
   AgentModuleBacking,
   AgentSourceComposition,
@@ -54,7 +55,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 44;
+export const COMPILED_AGENT_MANIFEST_VERSION = 48;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -220,22 +221,27 @@ export type CompiledWorkspaceResourceRoot = z.infer<typeof compiledWorkspaceReso
  */
 export type CompiledConnectionDefinition = z.infer<typeof compiledConnectionDefinitionSchema>;
 
+/** Dynamic connection resolver source preserved for runtime evaluation. */
+export interface CompiledDynamicConnectionDefinition extends ModuleSourceRef {
+  readonly eventNames: readonly string[];
+  /** Map results from extensions receive this mount namespace. */
+  readonly extensionNamespace?: string;
+  readonly slug: string;
+}
+
 /**
  * Normalized authored tool metadata preserved in the compiled manifest.
  */
 export type CompiledToolDefinition = InternalToolDefinition &
   ModuleSourceRef & {
+    readonly behavior?: CompiledToolBehavior;
     readonly hasExecute: boolean;
     readonly hasModelOutputProjection: boolean;
     readonly requiresApproval: boolean;
+    readonly workflowProgram?: {
+      readonly maxSubagents: number;
+    };
   };
-
-/**
- * Serializable configuration for the experimental framework `Workflow` tool.
- */
-export interface CompiledWorkflowToolDefinition extends ModuleSourceRef {
-  readonly maxSubagents?: number;
-}
 
 /**
  * Compiled dynamic tool resolver entry. The resolver function lives in the
@@ -560,6 +566,8 @@ const compiledAgentWorkflowWorldDefinitionSchema = z.string();
 
 const compiledAgentWorkflowDefinitionSchema = z
   .object({
+    modelCallsPerStep: z.number().int().positive().optional(),
+    retention: z.literal(AGENT_WORKFLOW_RETENTION_VALUES).optional(),
     world: compiledAgentWorkflowWorldDefinitionSchema.optional(),
   })
   .strict();
@@ -572,34 +580,26 @@ const compiledAgentCompactionDefinitionSchema: z.ZodType<CompiledAgentCompaction
   .strict();
 
 const sessionTokenLimitSchema = z.union([z.number().int().positive(), z.literal(false)]);
+const sessionTokenCostLimitSchema = z.union([z.number().finite().positive(), z.literal(false)]);
 const sessionTimeoutSchema = z.union([z.number().int().positive(), z.literal(false)]);
 
 const compiledAgentLimitsDefinitionSchema = z
   .object({
     maxInputTokensPerSession: sessionTokenLimitSchema.optional(),
     maxOutputTokensPerSession: sessionTokenLimitSchema.optional(),
+    maxTokenCostUsdPerSession: sessionTokenCostLimitSchema.optional(),
     sessionTimeoutMs: sessionTimeoutSchema.optional(),
-  })
-  .strict();
-
-const compiledWorkflowToolDefinitionSchema: z.ZodType<CompiledWorkflowToolDefinition> = z
-  .object({
-    exportName: z.string().optional(),
-    logicalPath: z.string(),
-    maxSubagents: z.number().int().positive().optional(),
-    sourceId: z.string(),
-    sourceKind: z.literal("module"),
   })
   .strict();
 
 const compiledAgentConfigBaseFields = {
   build: compiledAgentBuildDefinitionSchema.optional(),
   compaction: compiledAgentCompactionDefinitionSchema.optional(),
+  defaultTools: z.boolean().optional(),
   description: z.string().optional(),
   experimental: z
     .object({
       instrumentationProviders: z.boolean().optional(),
-      tasks: z.boolean().optional(),
       workflow: compiledAgentWorkflowDefinitionSchema.optional(),
     })
     .strict()
@@ -798,8 +798,65 @@ const compiledConnectionDefinitionSchema = z
   })
   .strict();
 
+const compiledDynamicConnectionDefinitionSchema: z.ZodType<CompiledDynamicConnectionDefinition> = z
+  .object({
+    eventNames: z.array(z.string()).readonly(),
+    exportName: z.string().optional(),
+    extensionNamespace: z.string().optional(),
+    logicalPath: z.string(),
+    slug: z.string(),
+    sourceId: z.string(),
+    sourceKind: z.literal("module"),
+  })
+  .strict();
+
+const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
+  .object({
+    availability: z
+      .array(z.enum(["delegated-task-child", "requires-request-input", "root-session"]))
+      .readonly(),
+    handling: z
+      .discriminatedUnion("kind", [
+        z
+          .object({
+            action: z.enum(["self-agent", "task-cancel"]),
+            kind: z.literal("dispatch"),
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal("provider-tool"),
+            provider: z.enum(["exa", "parallel"]),
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal("request-input"),
+            request: z.literal("question"),
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal("workflow-tool"),
+            workflowId: z.string(),
+          })
+          .strict(),
+      ])
+      .optional(),
+    presentation: z.literal("load-skill").optional(),
+    shape: z
+      .object({
+        lifetime: z.enum(["step", "task"]),
+        suspend: z.enum(["none", "workflow"]),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
 const compiledToolDefinitionSchema = z
   .object({
+    behavior: compiledToolBehaviorSchema.optional(),
     description: z.string(),
     execution: z.literal("background").optional(),
     exportName: z.string().optional(),
@@ -812,6 +869,12 @@ const compiledToolDefinitionSchema = z
     requiresApproval: z.boolean(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
+    workflowProgram: z
+      .object({
+        maxSubagents: z.number().int().positive(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -896,10 +959,9 @@ const compiledAgentResourceFields = {
   bindings: z.record(z.string(), compiledModuleBindingSchema),
   channelRoutes: compiledChannelRoutePlanSchema,
   connections: z.array(compiledConnectionDefinitionSchema),
+  dynamicConnections: z.array(compiledDynamicConnectionDefinitionSchema).default([]),
   diagnosticsSummary: discoverDiagnosticsSummarySchema,
   sourceComposition: agentSourceCompositionSchema,
-  workflowTool: compiledWorkflowToolDefinitionSchema.optional(),
-  webSearchProvider: z.enum(["exa", "parallel"]).optional(),
   dynamicInstructions: z.array(compiledDynamicInstructionsDefinitionSchema).default([]),
   dynamicSkills: z.array(compiledDynamicSkillDefinitionSchema).default([]),
   dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
@@ -1005,10 +1067,9 @@ export const compiledAgentManifestSchema = z
     channelRoutes: compiledChannelRoutePlanSchema,
     config: compiledAgentConfigSchema,
     connections: z.array(compiledConnectionDefinitionSchema),
+    dynamicConnections: z.array(compiledDynamicConnectionDefinitionSchema).default([]),
     diagnosticsSummary: discoverDiagnosticsSummarySchema,
     sourceComposition: agentSourceCompositionSchema,
-    workflowTool: compiledWorkflowToolDefinitionSchema.optional(),
-    webSearchProvider: z.enum(["exa", "parallel"]).optional(),
     dynamicInstructions: z.array(compiledDynamicInstructionsDefinitionSchema).default([]),
     dynamicSkills: z.array(compiledDynamicSkillDefinitionSchema).default([]),
     dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
@@ -1035,10 +1096,9 @@ export interface CreateCompiledAgentResourcesInput {
   readonly bindings: Readonly<Record<string, CompiledModuleBinding>>;
   readonly channelRoutes: CompiledChannelRoutePlan;
   readonly connections?: readonly CompiledConnectionDefinition[];
+  readonly dynamicConnections?: readonly CompiledDynamicConnectionDefinition[];
   readonly diagnosticsSummary?: DiscoverDiagnosticsSummary;
   readonly sourceComposition: AgentSourceComposition;
-  readonly workflowTool?: CompiledWorkflowToolDefinition;
-  readonly webSearchProvider?: WebSearchProvider;
   readonly dynamicInstructions?: readonly CompiledDynamicInstructionsDefinition[];
   readonly dynamicSkills?: readonly CompiledDynamicSkillDefinition[];
   readonly dynamicTools?: readonly CompiledDynamicToolDefinition[];
@@ -1070,6 +1130,7 @@ export function createCompiledAgentResources(
       shadowed: [...input.channelRoutes.shadowed],
     },
     connections: [...(input.connections ?? [])],
+    dynamicConnections: [...(input.dynamicConnections ?? [])],
     diagnosticsSummary: input.diagnosticsSummary ?? {
       errors: 0,
       warnings: 0,
@@ -1077,8 +1138,6 @@ export function createCompiledAgentResources(
     sourceComposition: {
       entries: [...input.sourceComposition.entries],
     },
-    workflowTool: input.workflowTool === undefined ? undefined : { ...input.workflowTool },
-    webSearchProvider: input.webSearchProvider,
     dynamicInstructions: [...(input.dynamicInstructions ?? [])],
     dynamicSkills: [...(input.dynamicSkills ?? [])],
     dynamicTools: [...(input.dynamicTools ?? [])],
@@ -1135,17 +1194,19 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
           : cloneCompiledRuntimeModelReference(config.compaction.model),
       thresholdPercent: config.compaction?.thresholdPercent,
     },
+    defaultTools: config.defaultTools,
     description: config.description,
     experimental:
       config.experimental === undefined
         ? undefined
         : {
             instrumentationProviders: config.experimental.instrumentationProviders,
-            tasks: config.experimental.tasks,
             workflow:
               config.experimental.workflow === undefined
                 ? undefined
                 : {
+                    modelCallsPerStep: config.experimental.workflow.modelCallsPerStep,
+                    retention: config.experimental.workflow.retention,
                     world: config.experimental.workflow.world,
                   },
           },
@@ -1158,6 +1219,7 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
         : {
             maxInputTokensPerSession: config.limits.maxInputTokensPerSession,
             maxOutputTokensPerSession: config.limits.maxOutputTokensPerSession,
+            maxTokenCostUsdPerSession: config.limits.maxTokenCostUsdPerSession,
             sessionTimeoutMs: config.limits.sessionTimeoutMs,
           },
     source: { ...config.source },
@@ -1221,10 +1283,9 @@ export function createCompiledAgentManifest(input: {
   readonly channelRoutes: CompiledChannelRoutePlan;
   readonly config: CompiledAgentDefinition;
   readonly connections?: readonly CompiledConnectionDefinition[];
+  readonly dynamicConnections?: readonly CompiledDynamicConnectionDefinition[];
   readonly diagnosticsSummary?: DiscoverDiagnosticsSummary;
   readonly sourceComposition: AgentSourceComposition;
-  readonly workflowTool?: CompiledWorkflowToolDefinition;
-  readonly webSearchProvider?: WebSearchProvider;
   readonly dynamicInstructions?: readonly CompiledDynamicInstructionsDefinition[];
   readonly dynamicSkills?: readonly CompiledDynamicSkillDefinition[];
   readonly dynamicTools?: readonly CompiledDynamicToolDefinition[];

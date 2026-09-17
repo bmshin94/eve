@@ -56,7 +56,7 @@ async function createEnvironmentFixture(): Promise<string> {
   await mkdir(join(fixtureRoot, "agent"), { recursive: true });
   await writeFile(
     join(fixtureRoot, "package.json"),
-    `${JSON.stringify({ name: "eve-eval-env-test", private: true, type: "module" })}\n`,
+    `${JSON.stringify({ dependencies: { eve: "*" }, name: "eve-eval-env-test", private: true, type: "module" })}\n`,
   );
   await writeFile(
     join(fixtureRoot, "agent", "agent.mjs"),
@@ -162,7 +162,7 @@ describe("eve eval environment loading", () => {
         async start() {
           lifecycle.push("start");
           // The host reloads env files before it copies the environment into its worker.
-          loadDevelopmentEnvironmentFiles(fixtureRoot);
+          await loadDevelopmentEnvironmentFiles(fixtureRoot);
           expectOverrides();
           if (mode === "startup failure") throw new Error("fixture startup failed");
           return { url: "http://127.0.0.1:43123" };
@@ -203,7 +203,7 @@ describe("eve eval environment loading", () => {
     expectedLifecycle.push("teardown");
     expect(lifecycle).toEqual(expectedLifecycle);
     expectOverrides();
-    loadDevelopmentEnvironmentFiles(fixtureRoot);
+    await loadDevelopmentEnvironmentFiles(fixtureRoot);
     expectOverrides();
     if (mode === "close failure" || mode === "teardown failure") {
       expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("Eval cleanup failed:"));

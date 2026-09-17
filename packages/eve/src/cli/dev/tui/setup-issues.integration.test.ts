@@ -55,7 +55,7 @@ describe("BOOT_DETECTIONS against a real directory", () => {
     const appRoot = await linkedAppRoot();
     const issues = await detectSetupIssues({ appRoot, env: {} });
     expect(issues).toEqual([
-      { kind: "attention", label: "AI Gateway credentials missing", command: "/model" },
+      { kind: "attention", label: "AI Gateway credentials missing", command: "/login" },
     ]);
   });
 
@@ -71,12 +71,12 @@ describe("BOOT_DETECTIONS against a real directory", () => {
       {
         kind: "attention",
         label: "AI Gateway credentials missing",
-        command: "/model",
+        command: "/login",
       },
     ]);
   });
 
-  it("opens model setup from the prefilled onboarding prompt when inspection is unavailable", async () => {
+  it("opens only login during onboarding when inspection is unavailable", async () => {
     const appRoot = await linkedAppRoot();
     const client = new Client({ host: "http://localhost:3000" });
     vi.spyOn(client, "info").mockRejectedValue(new Error("inspection unavailable"));
@@ -107,22 +107,16 @@ describe("BOOT_DETECTIONS against a real directory", () => {
       renderer,
       serverUrl: "http://localhost:3000",
       session: client.sessions.attach("session_test"),
-      initialInput: "/model",
+      onboard: true,
     });
 
     await runner.run();
 
-    expect(handle).toHaveBeenNthCalledWith(
-      1,
-      { type: "extension", name: "model", argument: "" },
-      { renderer, title: "eve", initialModelStep: "provider" },
-    );
-    expect(handle).toHaveBeenNthCalledWith(
-      2,
-      { type: "extension", name: "add", argument: "" },
-      { renderer, title: "eve" },
+    expect(handle).toHaveBeenCalledExactlyOnceWith(
+      { type: "extension", name: "login", argument: "" },
+      expect.objectContaining({ renderer, title: "eve", initialModelStep: "provider" }),
     );
     expect(readPrompt).toHaveBeenCalledOnce();
-    expect(order).toEqual(["model", "add", "prompt"]);
+    expect(order).toEqual(["login", "prompt"]);
   });
 });

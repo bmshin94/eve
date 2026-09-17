@@ -44,7 +44,12 @@ export async function computeDevelopmentHostFingerprint(
     environment: readDevelopmentEnvironmentHostValues(host.appRoot),
     instrumentation: await readInstrumentationSource(host),
     workflow: {
-      enabled: agentNodes.some((node) => node.workflowTool !== undefined),
+      // Authored workflow bodies and step registrations are bundled into the
+      // host, so their sources are structural, not runtime, state.
+      authoredSources: host.generation.workflowSourceFingerprint ?? null,
+      enabled: agentNodes.some((node) =>
+        node.tools.some((tool) => tool.workflowProgram !== undefined),
+      ),
       world: manifest.config.experimental?.workflow?.world ?? "local",
     },
   };

@@ -3,6 +3,7 @@ import type { ModelMessage } from "ai";
 import type { SessionAuth } from "#context/keys.js";
 import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { ConversationContext } from "#shared/conversation-context.js";
 
 /**
  * Stream event types allowed for dynamic tool resolvers. Dispatch
@@ -33,6 +34,10 @@ export const ALLOWED_DYNAMIC_SKILL_EVENTS: ReadonlySet<string> = new Set<Dynamic
   "turn.started",
 ]);
 
+export const ALLOWED_DYNAMIC_CONNECTION_EVENTS: ReadonlySet<string> = new Set<DynamicToolEventName>(
+  ["session.started", "turn.started"],
+);
+
 /**
  * Context passed to a dynamic resolver's event handler.
  *
@@ -41,6 +46,10 @@ export const ALLOWED_DYNAMIC_SKILL_EVENTS: ReadonlySet<string> = new Set<Dynamic
  * the session context inside tool `execute` functions.
  */
 export interface DynamicResolveContext {
+  /** Active cancellation signal when resolving a dynamic model. */
+  readonly abortSignal?: AbortSignal;
+  /** Effective model for this resolver, or `null` before dynamic model selection. */
+  readonly model: { readonly id: string } | null;
   readonly session: {
     readonly id: string;
     readonly auth: SessionAuth;
@@ -54,6 +63,11 @@ export interface DynamicResolveContext {
     /** Free-form channel-specific metadata attached to the request. */
     readonly metadata?: Readonly<Record<string, unknown>>;
   };
+  /**
+   * Immutable classification and execution context for the active conversation.
+   * Absent on sessions persisted before this context key existed.
+   */
+  readonly conversation?: ConversationContext;
   /** Conversation history visible at this resolve point, oldest first. */
   readonly messages: readonly ModelMessage[];
 }
@@ -95,7 +109,7 @@ export type DynamicSentinel<TResult = unknown> = {
 
 /**
  * Defines a dynamic resolver evaluated at runtime from stream-event
- * handlers. It is shared across tools, skills, and agent definitions;
+ * handlers. It is shared across tools, skills, connections, and agent definitions;
  * the directory it is authored in (not this function) decides what each
  * handler must return and which events are honored. The file's path-derived
  * slug names the single-entry case; a `Record<string, ...>` return names
@@ -106,12 +120,14 @@ export type DynamicSentinel<TResult = unknown> = {
  *   `Record<string, defineTool(...)>`, or `null`.
  * - `agent/skills/`: return a single `defineSkill(...)`, a
  *   `Record<string, defineSkill(...)>`, or `null`.
+ * - `agent/connections/`: return one connection definition, a
+ *   `Record<string, connection definition>`, or `null`.
  * - `agent/subagents/<name>/agent.ts`: return `defineAgent(...)` to configure
  *   and expose the subagent, or `null` to omit it.
  *
  * Per-slot events: tools resolvers run at `session.started`,
- * `turn.started`, and `step.started`. Skills resolvers run only at
- * `session.started` and `turn.started`; the runtime never invokes a
+ * `turn.started`, and `step.started`. Skills and connection resolvers run only
+ * at `session.started` and `turn.started`; the runtime never invokes a
  * handler keyed on `step.started` in that slot. Dynamic subagents run at
  * `session.started` and `turn.started` only.
  *

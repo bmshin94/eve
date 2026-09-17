@@ -76,6 +76,7 @@ export class McpConnectionClient implements ConnectionClient {
 
     try {
       return await createMCPClient({
+        protocolVersionDiscovery: this.#connection.protocolVersionDiscovery,
         transport: { type: "http", url, headers },
       });
     } catch (error) {
@@ -83,6 +84,7 @@ export class McpConnectionClient implements ConnectionClient {
         throw error;
       }
       return await createMCPClient({
+        protocolVersionDiscovery: this.#connection.protocolVersionDiscovery,
         transport: { type: "sse", url, headers },
       });
     }
@@ -258,6 +260,7 @@ export class McpConnectionClient implements ConnectionClient {
     await evictScopedToken({
       authorization,
       connection: { url: this.#connection.url },
+      instanceId: this.#connection.instanceId,
       scope: this.#connection.connectionName,
     });
   }
@@ -409,7 +412,7 @@ export async function resolveHeaders(
 
 /**
  * Resolves a connection's bearer token via the shared scoped-token path,
- * keyed by the connection name. See
+ * keyed by the resolved connection instance. See
  * {@link resolveScopedToken} for the cache and principal semantics.
  */
 async function resolveToken(
@@ -419,6 +422,7 @@ async function resolveToken(
   return await resolveScopedToken({
     authorization,
     connection: { url: connection.url },
+    instanceId: connection.instanceId,
     scope: connection.connectionName,
   });
 }

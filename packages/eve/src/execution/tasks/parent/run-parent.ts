@@ -1,7 +1,7 @@
 import type { TaskRunWorkflowInput } from "#execution/tasks/child/workflow.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import {
-  startWorkflowPreferLatest,
+  startWorkflowOnCurrentDeployment,
   taskRunWorkflowReference,
   waitForCommandHookOwner,
 } from "#execution/workflow-runtime.js";
@@ -19,8 +19,8 @@ const TASK_VIEW_READ_TIMEOUT_MS = 10_000;
 /**
  * Node-side controls for durable task runs — the generic transport layer.
  * This module only speaks `TaskCommand`/`TaskView`; it knows nothing about
- * subagents, receipts, or the session index. Caller-specific policy (e.g.
- * subagent delegation in `delegate.ts`) composes these primitives.
+ * executor implementations, receipts, or the session index. Caller-specific
+ * policy composes these primitives.
  *
  * Every export must be called from inside a `"use step"` body; none of
  * these are steps themselves so dispatch and tool steps can compose them
@@ -29,7 +29,7 @@ const TASK_VIEW_READ_TIMEOUT_MS = 10_000;
 
 /** Starts the durable run owning one task's lifecycle. */
 export async function startTaskRun(input: TaskRunWorkflowInput): Promise<void> {
-  await startWorkflowPreferLatest(taskRunWorkflowReference, [input]);
+  await startWorkflowOnCurrentDeployment(taskRunWorkflowReference, [input]);
 }
 
 /** Resolves the task run that won ownership of one replay-stable command token. */

@@ -6,14 +6,15 @@ import {
   type RoutedDeliverResult,
 } from "#execution/proxied-deliver-step.js";
 import {
-  emitRecordedTaskAuthorizationEventStep,
   emitRecordedTaskInputRequestStep,
-} from "#execution/subagent-event-proxy-step.js";
+  runProxySubagentEventStep,
+} from "#subagents/event-proxy-step.js";
 import {
-  acceptTaskAuthorizationEventStep,
   recordTerminalTaskViewsStep,
   recordTaskInputRequestStep,
 } from "#execution/tasks/parent/hitl-proxy-steps.js";
+import { acceptTaskAuthorizationEventStep } from "#execution/tools/subagent/accept-event-step.js";
+import { applyTaskAgentRequest } from "#execution/tools/subagent/task-agent-requests.js";
 
 /**
  * Coalesces inbound deliver payloads and routes any descendant-bound input
@@ -22,12 +23,12 @@ import {
  *
  * Short-circuits via `hasProxyInputRequests` so the common no-active-descendant
  * path skips a durable step boundary. Lives in its own non-step module so both
- * the driver and the active turn can share it (a `"use step"` module cannot
+ * the owner and the active turn can share it (a `"use step"` module cannot
  * re-export plain helpers into a workflow body).
  */
 export async function routeDeliverToChildren(input: {
   readonly delivery: DeliverHookPayload;
-  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly sessionWritable: WritableStream<Uint8Array>;
   readonly sessionState: DurableSessionState;
   readonly serializedContext: Record<string, unknown>;
 }): Promise<RoutedDeliverResult> {
@@ -35,25 +36,16 @@ export async function routeDeliverToChildren(input: {
   let serializedContext = input.serializedContext;
   let sessionState = input.sessionState;
 
-  if ((payload.task?.views?.length ?? 0) > 0) {
-    sessionState = await recordTerminalTaskViewsStep({
-      sessionState,
-      views: payload.task?.views ?? [],
-    });
-  }
-
   for (const request of payload.task?.inputRequests ?? []) {
     const recorded = await recordTaskInputRequestStep({
-      hookPayload: request.hookPayload,
-      serializedContext,
+      request,
       sessionState,
-      taskId: request.taskId,
     });
     sessionState = recorded.sessionState;
     if (!recorded.accepted) continue;
     const emitted = await emitRecordedTaskInputRequestStep({
-      hookPayload: recorded.hookPayload,
-      parentWritable: input.parentWritable,
+      sessionWritable: input.sessionWritable,
+      request: recorded.request,
       serializedContext,
       sessionState,
     });
@@ -61,21 +53,45 @@ export async function routeDeliverToChildren(input: {
     sessionState = emitted.sessionState;
   }
 
-  for (const request of payload.task?.authorizationEvents ?? []) {
-    const accepted = await acceptTaskAuthorizationEventStep({
-      hookPayload: request.hookPayload,
-      sessionState,
-      taskId: request.taskId,
-    });
+  for (const request of payload.task?.agentRequests ?? []) {
+    const applied = await applyTaskAgentRequest(
+      { ...request, ownerId: request.taskId },
+      {
+        sessionWritable: input.sessionWritable,
+        serializedContext,
+        sessionState,
+      },
+    );
+    serializedContext = applied.serializedContext;
+    sessionState = applied.sessionState;
+  }
+
+  // Authorization is display-only: the callback completes against the child,
+  // so the parent re-emits the event without recording a proxy input request.
+  for (const delivery of payload.task?.authorizationEvents ?? []) {
+    const accepted = await acceptTaskAuthorizationEventStep({ delivery, sessionState });
     if (!accepted) continue;
-    const emitted = await emitRecordedTaskAuthorizationEventStep({
-      hookPayload: request.hookPayload,
-      parentWritable: input.parentWritable,
+    const emitted = await runProxySubagentEventStep({
+      hookPayload: delivery.hookPayload,
+      sessionWritable: input.sessionWritable,
       serializedContext,
       sessionState,
     });
     serializedContext = emitted.serializedContext;
     sessionState = emitted.sessionState;
+  }
+
+  // Child settlement carries the authoritative parked/terminal handle verdict
+  // and is enqueued before the task's terminal view. Preserve that ordering
+  // when several task deliveries are coalesced into one parent turn.
+  if ((payload.task?.views?.length ?? 0) > 0) {
+    const recorded = await recordTerminalTaskViewsStep({
+      serializedContext,
+      sessionState,
+      views: payload.task?.views ?? [],
+    });
+    serializedContext = recorded.serializedContext;
+    sessionState = recorded.sessionState;
   }
 
   const ordinaryPayloads: DeliverPayload[] = [];
@@ -114,7 +130,7 @@ export async function routeDeliverToChildren(input: {
 
   return await routeProxiedDeliverStep({
     delivery,
-    parentWritable: input.parentWritable,
+    sessionWritable: input.sessionWritable,
     serializedContext,
     sessionState,
   });

@@ -3,8 +3,10 @@ import type { DynamicResolveContext, DynamicToolEventName } from "#dynamic/defin
 import type {
   PublicToolInputSchema,
   PublicToolOutputSchema,
+  ToolLabelDefinition,
   ToolContext,
 } from "#tools/definition.js";
+import type { TaskExec } from "#tools/task.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
 
 /**
@@ -21,10 +23,12 @@ import type { ToolModelOutput } from "#tools/model-output.js";
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface DynamicToolEntry<TInput = Record<string, unknown>, TOutput = any> {
+  readonly label?: ToolLabelDefinition<TInput, TOutput>;
   readonly description: string;
   readonly inputSchema: PublicToolInputSchema<TInput>;
   readonly outputSchema?: PublicToolOutputSchema<TOutput>;
-  execute(input: TInput, ctx: ToolContext): TOutput | Promise<TOutput>;
+  readonly execution?: "background";
+  execute(input: TInput, ctx: ToolContext, task?: TaskExec): TOutput | Promise<TOutput>;
   readonly toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
   /**
    * Optional per-call approval gate, mirroring the authored-tool
@@ -33,6 +37,8 @@ export interface DynamicToolEntry<TInput = Record<string, unknown>, TOutput = an
    * use the same durable descriptor boundary as `execute` and `toModelOutput`.
    */
   readonly approval?: Approval;
+  /** Derives the input-scoped key recorded when this tool is approved. */
+  readonly approvalKey?: (toolInput: Readonly<Record<string, unknown>>) => string;
 }
 
 /**

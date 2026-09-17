@@ -1,664 +1,587 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { SubagentAuthorizationEventHookPayload } from "#channel/types.js";
-import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
-import {
-  appendTaskViewStep,
-  deliverTaskInputResponsesStep,
-  wakeTaskAuthorizationParentStep,
-  wakeTaskInputRequestParentStep,
-  wakeTaskParentStep,
-  wakeTaskUpdateParentStep,
-} from "#execution/tasks/child/steps.js";
+import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import { taskRunWorkflow } from "#execution/tasks/child/workflow.js";
-import type {
-  TaskCommandHookPayload,
-  TaskInboundAnswerInput,
-  TaskRunInboundPayload,
-  TaskView,
-} from "#tasks/types.js";
+import type { TaskView } from "#tasks/types.js";
+import {
+  createAuthorizationRequiredEvent,
+  createAuthorizationCompletedEvent,
+} from "#protocol/message.js";
 
-vi.mock("#compiled/@workflow/core/index.js", () => ({
-  createHook: vi.fn(),
-}));
-
-vi.mock("#execution/hook-ownership.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("#execution/hook-ownership.js")>()),
-  claimHookOwnership: vi.fn(),
-  disposeHook: vi.fn(),
-}));
-
-vi.mock("#execution/tasks/child/steps.js", () => ({
+const mocks = vi.hoisted(() => ({
+  appendTaskProgressStep: vi.fn(),
   appendTaskViewStep: vi.fn(),
+  cancelWorkflowToolRunStep: vi.fn(),
+  claimHookOwnership: vi.fn(),
+  createChannelReader: vi.fn((channel: string) => ({ channel, iterator: [][Symbol.iterator]() })),
+  createHook: vi.fn(() => ({ token: "task-token" })),
   deliverTaskInputResponsesStep: vi.fn(),
+  openWorkflowToolRunOwnerInbox: vi.fn(() => ({
+    owner: { inbox: "generated-owner-token" },
+    reader: { channel: "workflow" },
+  })),
+  raceChannelReads: vi.fn(),
+  resumeHookStep: vi.fn(),
+  wakeTaskAgentRequestParentStep: vi.fn(),
   wakeTaskAuthorizationParentStep: vi.fn(),
-  wakeTaskInputRequestParentStep: vi.fn(),
+  wakeTaskMessageParentStep: vi.fn(),
   wakeTaskParentStep: vi.fn(),
   wakeTaskUpdateParentStep: vi.fn(),
+  wakeWorkflowTaskInputRequestParentStep: vi.fn(),
+  executeWorkflowBody: vi.fn(),
+  createWorkflowBodyRef: vi.fn((input) => ({
+    callId: input.callId,
+    execution: input.execution,
+    input: input.input,
+    runId: "task-run",
+    sequence: input.session.turn.sequence,
+    stepIndex: input.stepIndex,
+    toolName: input.toolName,
+    turnId: input.session.turn.id,
+  })),
 }));
 
-afterEach(() => {
-  vi.resetAllMocks();
-});
+vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
+  createHook: mocks.createHook,
+}));
+vi.mock("#execution/hook-ownership.js", () => ({
+  claimHookOwnership: mocks.claimHookOwnership,
+  isHookConflictError: () => false,
+}));
+vi.mock("#execution/tasks/child/steps.js", () => ({
+  appendTaskProgressStep: mocks.appendTaskProgressStep,
+  appendTaskViewStep: mocks.appendTaskViewStep,
+  deliverTaskInputResponsesStep: mocks.deliverTaskInputResponsesStep,
+  wakeTaskAgentRequestParentStep: mocks.wakeTaskAgentRequestParentStep,
+  wakeTaskMessageParentStep: mocks.wakeTaskMessageParentStep,
+  wakeTaskAuthorizationParentStep: mocks.wakeTaskAuthorizationParentStep,
+  wakeTaskParentStep: mocks.wakeTaskParentStep,
+  wakeTaskUpdateParentStep: mocks.wakeTaskUpdateParentStep,
+  wakeWorkflowTaskInputRequestParentStep: mocks.wakeWorkflowTaskInputRequestParentStep,
+}));
+vi.mock("#execution/tools/workflow/cancel.js", () => ({
+  cancelWorkflowToolRunStep: mocks.cancelWorkflowToolRunStep,
+}));
+vi.mock("#execution/tools/workflow/owner-channels.js", () => ({
+  createChannelReader: mocks.createChannelReader,
+  raceChannelReads: mocks.raceChannelReads,
+}));
+vi.mock("#execution/tools/workflow/owner.js", () => ({
+  openWorkflowToolRunOwnerInbox: mocks.openWorkflowToolRunOwnerInbox,
+}));
+vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
+  resumeHookStep: mocks.resumeHookStep,
+}));
+vi.mock("#execution/tools/workflow/body.js", () => ({
+  createWorkflowBodyRef: mocks.createWorkflowBodyRef,
+  executeWorkflowBody: mocks.executeWorkflowBody,
+}));
 
-function createWorkingView(): TaskView {
+const initialView = {
+  metadata: { kind: "tool", name: "approval-worker" },
+  status: "working",
+  taskId: "task-1",
+} satisfies TaskView;
+
+const bufferedAgentRequest = {
+  kind: "request",
+  from: {
+    callId: "tool-call-1",
+    execution: "background",
+    input: { message: "authorize" },
+    runId: "run-1",
+    sequence: 0,
+    stepIndex: 0,
+    toolName: "approval-worker",
+    turnId: "turn-parent",
+  },
+  replyTo: "agent-reply",
+  request: {
+    input: { message: "authorize", target: "approver" },
+    invocationId: "tool-call-1:approver",
+    kind: "agent-invoke",
+  },
+} satisfies WorkflowToolRunMessage;
+
+const workflowAgentRequest = {
+  ...bufferedAgentRequest,
+  request: {
+    input: { message: "authorize", target: "approver" },
+    invocationId: "tool-call-1:approver:2",
+    kind: "agent-invoke",
+  },
+} satisfies WorkflowToolRunMessage;
+
+function authorizationRequest(attemptId: string, completed = false) {
+  const data = { attemptId, name: "github", sequence: 0, stepIndex: 0, turnId: "turn-parent" };
   return {
-    metadata: {
-      agentId: "ag_research:abcdef123456",
-      kind: "subagent",
-      mode: "local",
-      name: "research",
+    ...bufferedAgentRequest,
+    replyTo: `ack-${attemptId}`,
+    request: {
+      kind: "authorization-request",
+      event: {
+        kind: "subagent-authorization-event",
+        callId: "tool-call-1",
+        childSessionId: "run-1",
+        subagentName: "approval-worker",
+        event: completed
+          ? createAuthorizationCompletedEvent({ ...data, outcome: "authorized" })
+          : createAuthorizationRequiredEvent({ ...data, description: "Sign in" }),
+      },
     },
-    status: "working",
-    taskId: "task_abc123",
-  };
+  } satisfies WorkflowToolRunMessage;
 }
 
-function mockCommandHook(
-  payloads: readonly (TaskRunInboundPayload | SubagentAuthorizationEventHookPayload)[],
-): void {
-  const queue = [...payloads];
-  const hook = {
-    [Symbol.asyncIterator]: () => ({
-      next: async () =>
-        queue.length > 0
-          ? { done: false as const, value: queue.shift() as TaskCommandHookPayload }
-          : { done: true as const, value: undefined },
-    }),
-    token: "task-token",
-  } as Hook<TaskRunInboundPayload | SubagentAuthorizationEventHookPayload>;
-  vi.mocked(createHook).mockReturnValue(hook);
+function queueOwnerRequest(value: WorkflowToolRunMessage) {
+  mocks.raceChannelReads.mockResolvedValueOnce({
+    channel: "workflow",
+    next: { done: false, value },
+  });
 }
 
-function appendedStatuses(): readonly string[] {
-  return vi.mocked(appendTaskViewStep).mock.calls.map(([input]) => input.view.status);
+function queueCommand(command: import("#tasks/types.js").TaskCommand) {
+  mocks.raceChannelReads.mockResolvedValueOnce({
+    channel: "commands",
+    next: { done: false, value: { kind: "task-command", command } },
+  });
 }
+
+const workflowInput = {
+  initialView,
+  parentContinuationToken: "parent-token",
+  taskInboxToken: "task-token",
+};
 
 describe("taskRunWorkflow", () => {
-  it("forwards child updates after dispatch acknowledgement without changing the view", async () => {
-    const update = {
-      callId: "update-call",
-      updateIndex: 2,
-      updateEpoch: "turn-child",
-      kind: "task-update" as const,
-      message: "Found three matching records.",
-    };
-    mockCommandHook([
-      update,
-      { command: { kind: "ready" }, kind: "task-command" },
-      { ...update, callId: "update-call-2" },
-      { command: { data: "done", kind: "complete" }, kind: "task-command" },
-    ]);
-
-    const view = createWorkingView();
-    await taskRunWorkflow({
-      taskInboxToken: "task-token",
-      initialView: view,
-      parentContinuationToken: "parent-session-token",
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mocks.createHook.mockReturnValue({ token: "task-token" });
+    mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({
+      owner: { inbox: "generated-owner-token" },
+      reader: { channel: "workflow" },
     });
-
-    expect(wakeTaskUpdateParentStep).toHaveBeenNthCalledWith(1, {
-      token: "parent-session-token",
-      update,
-      view,
-    });
-    expect(wakeTaskUpdateParentStep).toHaveBeenNthCalledWith(2, {
-      token: "parent-session-token",
-      update: { ...update, callId: "update-call-2" },
-      view,
-    });
-    expect(appendedStatuses()).toEqual(["working", "working", "completed"]);
-  });
-
-  it("forwards a fast child update before its terminal wake", async () => {
-    const update = {
-      callId: "update-call",
-      updateIndex: 2,
-      updateEpoch: "turn-child",
-      kind: "task-update" as const,
-      message: "Final progress update.",
-    };
-    mockCommandHook([
-      update,
-      { command: { data: "done", kind: "complete" }, kind: "task-command" },
-      { command: { kind: "ready" }, kind: "task-command" },
-    ]);
-
-    await taskRunWorkflow({
-      taskInboxToken: "task-token",
-      initialView: createWorkingView(),
-      parentContinuationToken: "parent-session-token",
-    });
-
-    expect(wakeTaskUpdateParentStep).toHaveBeenCalledWith({
-      token: "parent-session-token",
-      update,
-      view: expect.objectContaining({ status: "completed" }),
-    });
-    expect(wakeTaskParentStep).toHaveBeenCalledWith({
-      token: "parent-session-token",
-      view: expect.objectContaining({ status: "completed" }),
-    });
-    expect(vi.mocked(wakeTaskUpdateParentStep).mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(wakeTaskParentStep).mock.invocationCallOrder[0] ?? 0,
-    );
-  });
-
-  it("publishes the initial view, applies commands, and stops at terminal", async () => {
-    mockCommandHook([
-      { command: { kind: "ready" }, kind: "task-command" },
-      {
-        command: {
-          inputRequests: [{ question: "which?", requestId: "req-1" }],
-          kind: "require-input",
-        },
-        kind: "task-command",
-      },
-      { command: { kind: "answered", requestIds: ["req-1"] }, kind: "task-command" },
-      { command: { data: "done", kind: "complete" }, kind: "task-command" },
-      // Never consumed: the run stops at the terminal transition.
-      { command: { kind: "cancel" }, kind: "task-command" },
-    ]);
-
-    await taskRunWorkflow({
-      taskInboxToken: "task-token",
-      initialView: createWorkingView(),
-      parentContinuationToken: "parent-session-token",
-    });
-
-    expect(appendedStatuses()).toEqual([
-      "working",
-      "working",
-      "input_required",
-      "working",
-      "completed",
-    ]);
-    expect(disposeHook).toHaveBeenCalledTimes(1);
-  });
-
-  it("skips views for rejected and noop commands", async () => {
-    mockCommandHook([
-      { command: { kind: "answered", requestIds: ["req-1"] }, kind: "task-command" }, // noop on working
-      { command: { kind: "cancel" }, kind: "task-command" },
-    ]);
-
-    await taskRunWorkflow({
-      taskInboxToken: "task-token",
-      initialView: createWorkingView(),
-      parentContinuationToken: "parent-session-token",
-    });
-
-    expect(appendedStatuses()).toEqual(["working", "cancelled"]);
-  });
-
-  it("exits without touching the lifecycle when the hook claim conflicts", async () => {
-    mockCommandHook([]);
-    vi.mocked(claimHookOwnership).mockRejectedValue(
-      Object.assign(new Error("Hook token in use"), { name: "HookConflictError" }),
-    );
-
-    await taskRunWorkflow({
-      taskInboxToken: "task-token",
-      initialView: createWorkingView(),
-      parentContinuationToken: "parent-session-token",
-    });
-
-    expect(appendTaskViewStep).not.toHaveBeenCalled();
-    expect(disposeHook).not.toHaveBeenCalled();
-  });
-
-  it("disposes its hook when the command stream closes early", async () => {
-    mockCommandHook([
-      { command: { inputRequests: [], kind: "require-input" }, kind: "task-command" },
-    ]);
-
-    await taskRunWorkflow({
-      taskInboxToken: "task-token",
-      initialView: createWorkingView(),
-      parentContinuationToken: "parent-session-token",
-    });
-
-    expect(appendedStatuses()).toEqual(["working"]);
-    expect(disposeHook).toHaveBeenCalledTimes(1);
-  });
-
-  it("translates a settled child turn from the wire and wakes the parent once ready", async () => {
-    const ZERO = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 };
-    mockCommandHook([
-      { command: { kind: "ready" }, kind: "task-command" },
-      {
-        kind: "runtime-action-result",
-        results: [
-          {
-            outcome: {
-              kind: "parked",
-              result: { kind: "succeeded", output: "answer" },
-              usageDelta: ZERO,
-            },
-            output: "answer",
-          },
-        ],
-      },
-    ]);
-
-    await taskRunWorkflow({
-      taskInboxToken: "task-token",
-      initialView: {
-        ...createWorkingView(),
-        metadata: {
-          agentId: "ag_research:abcdef123456",
-          kind: "subagent",
-          mode: "local",
-          name: "research",
-        },
-      },
-      parentContinuationToken: "parent-session-token",
-    });
-
-    expect(appendedStatuses()).toEqual(["working", "working", "completed"]);
-    expect(wakeTaskParentStep).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(wakeTaskParentStep).mock.calls[0]?.[0]).toMatchObject({
-      token: "parent-session-token",
-      view: { status: "completed", taskId: "task_abc123" },
+    mocks.executeWorkflowBody.mockResolvedValue({
+      outcome: { output: "done", status: "completed" },
+      reportCount: 0,
     });
   });
 
-  it("keeps a fast terminal task hook alive until dispatch acknowledgement", async () => {
-    mockCommandHook([
-      {
-        kind: "runtime-action-result",
-        results: [
-          {
-            outcome: {
-              kind: "parked",
-              result: { kind: "succeeded", output: "fast" },
-            },
-            output: "fast",
-          },
-        ],
-      },
-      { command: { kind: "ready" }, kind: "task-command" },
-    ]);
+  it("persists auth requests and answers before forwarding and acknowledging each event", async () => {
+    queueCommand({ kind: "ready" });
+    queueOwnerRequest(authorizationRequest("a"));
+    queueOwnerRequest(authorizationRequest("b"));
+    queueOwnerRequest(authorizationRequest("a", true));
+    queueOwnerRequest(authorizationRequest("b", true));
+    mocks.raceChannelReads.mockResolvedValueOnce({ channel: "commands", next: { done: true } });
 
-    await taskRunWorkflow({
-      taskInboxToken: "task-token",
-      initialView: createWorkingView(),
-      parentContinuationToken: "parent-session-token",
-    });
+    await taskRunWorkflow(workflowInput);
 
-    expect(appendedStatuses()).toEqual(["working", "completed"]);
-    expect(wakeTaskParentStep).toHaveBeenCalledTimes(1);
-    expect(disposeHook).toHaveBeenCalledTimes(1);
-  });
-
-  it("silently terminates a dispatch rejected before parent indexing", async () => {
-    mockCommandHook([
-      {
-        command: { data: { code: "START_FAILED" }, kind: "reject-dispatch" },
-        kind: "task-command",
-      },
-    ]);
-
-    await taskRunWorkflow({
-      taskInboxToken: "task-token",
-      initialView: createWorkingView(),
-      parentContinuationToken: "parent-session-token",
-    });
-
-    expect(appendedStatuses()).toEqual(["working", "failed"]);
-    expect(wakeTaskParentStep).not.toHaveBeenCalled();
-    expect(disposeHook).toHaveBeenCalledTimes(1);
-  });
-
-  it("releases a fast input request when the readiness barrier arrives", async () => {
-    mockCommandHook([
-      {
-        callId: "call-task",
-        childContinuationToken: "child-token",
-        childSessionId: "child-session",
-        event: {
-          requests: [
-            {
-              action: { callId: "call-q", input: {}, kind: "tool-call", toolName: "ask" },
-              kind: "question",
-              prompt: "Which?",
-              requestId: "q1",
-            },
-          ],
-          sequence: 1,
-          stepIndex: 2,
-          turnId: "turn-child",
-        },
-        kind: "subagent-input-request",
-        subagentName: "research",
-      },
-      { command: { kind: "ready" }, kind: "task-command" },
-    ]);
-
-    await taskRunWorkflow({
-      taskInboxToken: "task-token",
-      initialView: createWorkingView(),
-      parentContinuationToken: "parent-session-token",
-    });
-
-    expect(wakeTaskInputRequestParentStep).toHaveBeenCalledTimes(1);
-    expect(wakeTaskParentStep).not.toHaveBeenCalled();
-  });
-
-  it("normalizes and holds a local authorization event until the readiness barrier", async () => {
-    mockCommandHook([
-      {
-        callId: "call-task",
-        childSessionId: "child-session",
-        event: {
-          data: {
-            attemptId: "github-1",
-            description: "Authorize GitHub",
-            name: "github",
-            sequence: 1,
-            stepIndex: 2,
-            turnId: "turn-child",
-          },
-          type: "authorization.required",
-        },
-        kind: "subagent-authorization-event",
-        subagentName: "research",
-      },
-      {
-        callId: "call-task",
-        childSessionId: "child-session",
-        event: {
-          data: {
-            attemptId: "linear-1",
-            description: "Authorize Linear",
-            name: "linear",
-            sequence: 1,
-            stepIndex: 2,
-            turnId: "turn-child",
-          },
-          type: "authorization.required",
-        },
-        kind: "subagent-authorization-event",
-        subagentName: "research",
-      },
-      { command: { kind: "ready" }, kind: "task-command" },
-    ]);
-
-    await taskRunWorkflow({
-      taskInboxToken: "task-token",
-      initialView: createWorkingView(),
-      parentContinuationToken: "parent-session-token",
-    });
-
-    expect(appendedStatuses()).toEqual([
-      "working",
+    const views = mocks.appendTaskViewStep.mock.calls.slice(-4).map(([input]) => input.view);
+    expect(views.map((view) => view.status)).toEqual([
       "input_required",
       "input_required",
       "input_required",
+      "working",
     ]);
-    expect(wakeTaskAuthorizationParentStep).toHaveBeenCalledTimes(2);
-    expect(wakeTaskAuthorizationParentStep).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        request: expect.objectContaining({
-          event: expect.objectContaining({
-            data: expect.objectContaining({ name: "github" }),
-          }),
-        }),
-      }),
-    );
-    expect(wakeTaskAuthorizationParentStep).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        request: expect.objectContaining({
-          event: expect.objectContaining({
-            data: expect.objectContaining({ name: "linear" }),
-          }),
-        }),
-      }),
-    );
-    expect(vi.mocked(wakeTaskAuthorizationParentStep).mock.invocationCallOrder[0]).toBeGreaterThan(
-      vi.mocked(appendTaskViewStep).mock.invocationCallOrder[2] ?? 0,
-    );
-  });
-
-  it("ignores approval lifecycle events and still wakes on terminal settlement", async () => {
-    mockCommandHook([
-      { command: { kind: "ready" }, kind: "task-command" },
-      {
-        callId: "call-task",
-        childSessionId: "child-session-1",
-        event: {
-          data: {
-            outcome: "approved",
-            requestId: "stale-1",
-            responderPrincipalId: "user-1",
-            sequence: 1,
-            stepIndex: 2,
-            turnId: "turn-child",
-          },
-          type: "approval.settled",
-        },
-        kind: "subagent-authorization-event",
-        subagentName: "research",
-      },
-      { command: { data: "done", kind: "complete" }, kind: "task-command" },
-    ]);
-
-    await taskRunWorkflow({
-      taskInboxToken: "task-token",
-      initialView: createWorkingView(),
-      parentContinuationToken: "parent-session-token",
-    });
-
-    expect(wakeTaskAuthorizationParentStep).not.toHaveBeenCalled();
-    expect(wakeTaskParentStep).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ view: expect.objectContaining({ status: "completed" }) }),
-    );
-  });
-
-  it("never wakes twice for one blocked child", async () => {
-    mockCommandHook([
-      { command: { kind: "ready" }, kind: "task-command" },
-      {
-        command: { inputRequests: [{ q: 1, requestId: "q1" }], kind: "require-input" },
-        kind: "task-command",
-      },
-      {
-        command: { inputRequests: [{ q: 2, requestId: "q2" }], kind: "require-input" },
-        kind: "task-command",
-      },
-      { command: { data: "done", kind: "complete" }, kind: "task-command" },
-    ]);
-
-    await taskRunWorkflow({
-      taskInboxToken: "task-token",
-      initialView: createWorkingView(),
-      parentContinuationToken: "parent-session-token",
-    });
-
-    // input_required wakes once; the second require-input replaces the
-    // batch without leaving the ready state, while terminal settlement
-    // still wakes independently after direct HITL responses.
-    expect(wakeTaskParentStep).toHaveBeenCalledTimes(2);
-  });
-
-  it("commits and forwards every exact local task HITL batch before terminal wake", async () => {
-    const request = (requestId: string) => ({
-      action: {
-        callId: `call-${requestId}`,
-        input: {},
-        kind: "tool-call" as const,
-        toolName: "ask",
-      },
-      kind: "question" as const,
-      prompt: requestId,
-      requestId,
-    });
-    const inbound = (requestId: string): TaskRunInboundPayload => ({
-      callId: "call-task",
-      childContinuationToken: "child-token",
-      childSessionId: "child-session-1",
-      event: { requests: [request(requestId)], sequence: 1, stepIndex: 2, turnId: "turn_child" },
-      kind: "subagent-input-request",
-      subagentName: "research",
-    });
-    mockCommandHook([
-      { command: { kind: "ready" }, kind: "task-command" },
-      inbound("q1"),
-      inbound("q2"),
-      { command: { data: "done", kind: "complete" }, kind: "task-command" },
-    ]);
-
-    await taskRunWorkflow({
-      taskInboxToken: "task-token",
-      initialView: createWorkingView(),
-      parentContinuationToken: "parent-session-token",
-    });
-
-    expect(wakeTaskInputRequestParentStep).toHaveBeenCalledTimes(2);
     expect(
-      vi.mocked(wakeTaskInputRequestParentStep).mock.calls.map(([input]) => {
-        const request = input.request.event.requests[0];
-        return request !== null && typeof request === "object"
-          ? Reflect.get(request, "requestId")
-          : undefined;
-      }),
-    ).toEqual(["q1", "q2"]);
-    expect(wakeTaskParentStep).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ view: expect.objectContaining({ status: "completed" }) }),
+      views
+        .slice(0, 3)
+        .map((view) =>
+          view.inputRequests.map((request: { requestId: string }) => request.requestId),
+        ),
+    ).toEqual([["a"], ["a", "b"], ["b"]]);
+    expect(mocks.wakeTaskAuthorizationParentStep).toHaveBeenCalledTimes(4);
+    expect(mocks.resumeHookStep).toHaveBeenCalledTimes(4);
+    expect(mocks.wakeTaskParentStep).not.toHaveBeenCalled();
+    for (let i = 0; i < 4; i++) {
+      expect(mocks.appendTaskViewStep.mock.invocationCallOrder[i + 2]).toBeLessThan(
+        mocks.wakeTaskAuthorizationParentStep.mock.invocationCallOrder[i]!,
+      );
+      expect(mocks.wakeTaskAuthorizationParentStep.mock.invocationCallOrder[i]).toBeLessThan(
+        mocks.resumeHookStep.mock.invocationCallOrder[i]!,
+      );
+    }
+  });
+
+  it("forwards child-agent auth without treating it as the workflow's own request", async () => {
+    const message = authorizationRequest("child");
+    message.request.event.childSessionId = "child-session";
+    queueCommand({ kind: "ready" });
+    queueOwnerRequest(message);
+    mocks.raceChannelReads.mockResolvedValueOnce({ channel: "commands", next: { done: true } });
+
+    await taskRunWorkflow(workflowInput);
+
+    expect(mocks.wakeTaskAuthorizationParentStep).toHaveBeenCalledExactlyOnceWith({
+      request: message.request,
+      taskId: initialView.taskId,
+      token: workflowInput.parentContinuationToken,
+    });
+    expect(mocks.resumeHookStep).not.toHaveBeenCalled();
+    expect(
+      mocks.appendTaskViewStep.mock.calls.some(([input]) => input.view.status === "input_required"),
+    ).toBe(false);
+  });
+
+  it("acknowledges buffered auth when dispatch is rejected without forwarding it", async () => {
+    queueOwnerRequest(authorizationRequest("a"));
+    queueCommand({ kind: "reject-dispatch", data: "rejected" });
+
+    await taskRunWorkflow(workflowInput);
+
+    expect(mocks.wakeTaskAuthorizationParentStep).not.toHaveBeenCalled();
+    expect(mocks.resumeHookStep).toHaveBeenCalledExactlyOnceWith("ack-a", null, {
+      ifPresent: true,
+    });
+    expect(
+      mocks.appendTaskViewStep.mock.calls.some(([input]) => input.view.status === "input_required"),
+    ).toBe(false);
+  });
+
+  it.each([false, true])(
+    "does not reopen a cancelled task for buffered auth (completed=%s)",
+    async (completed) => {
+      queueOwnerRequest(authorizationRequest("a", completed));
+      queueCommand({ kind: "cancel" });
+      queueCommand({ kind: "ready" });
+
+      await taskRunWorkflow(workflowInput);
+
+      expect(mocks.wakeTaskAuthorizationParentStep).toHaveBeenCalledTimes(completed ? 1 : 0);
+      expect(mocks.resumeHookStep).toHaveBeenCalledExactlyOnceWith("ack-a", null, {
+        ifPresent: true,
+      });
+      expect(mocks.appendTaskViewStep.mock.calls.map(([input]) => input.view.status)).toEqual([
+        "working",
+        "cancelled",
+      ]);
+    },
+  );
+
+  it.each(["persistence", "forwarding"])(
+    "does not acknowledge auth after failed %s",
+    async (failure) => {
+      queueCommand({ kind: "ready" });
+      queueOwnerRequest(authorizationRequest("a"));
+      if (failure === "persistence") {
+        mocks.appendTaskViewStep.mockImplementation(async ({ view }) => {
+          if (view.status === "input_required") throw new Error("failed persistence");
+        });
+      } else {
+        mocks.wakeTaskAuthorizationParentStep.mockRejectedValue(new Error("failed forwarding"));
+      }
+
+      await expect(taskRunWorkflow(workflowInput)).rejects.toThrow(`failed ${failure}`);
+      expect(mocks.resumeHookStep).not.toHaveBeenCalled();
+    },
+  );
+
+  it("delivers an authored message queued before completion and dispatch acknowledgement", async () => {
+    const message = {
+      callId: "call-1",
+      kind: "task-message" as const,
+      message: "Review the export",
+      messageEpoch: "task-1",
+      messageIndex: 0,
+    };
+    for (const value of [
+      message,
+      { kind: "task-command", command: { kind: "complete", data: "done" } },
+      { kind: "task-command", command: { kind: "ready" } },
+    ]) {
+      mocks.raceChannelReads.mockResolvedValueOnce({
+        channel: "commands",
+        next: { done: false, value },
+      });
+    }
+    await taskRunWorkflow({
+      initialView,
+      parentContinuationToken: "parent-token",
+      taskInboxToken: "task-token",
+    });
+    expect(mocks.wakeTaskMessageParentStep).toHaveBeenCalledWith({
+      message,
+      taskId: "task-1",
+      token: "parent-token",
+    });
+    expect(mocks.wakeTaskMessageParentStep.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.wakeTaskParentStep.mock.invocationCallOrder[0]!,
     );
-    const firstInputWakeOrder =
-      vi.mocked(wakeTaskInputRequestParentStep).mock.invocationCallOrder[0] ?? 0;
-    const firstInputAppendOrder = vi.mocked(appendTaskViewStep).mock.invocationCallOrder[2] ?? 0;
-    expect(firstInputAppendOrder).toBeLessThan(firstInputWakeOrder);
   });
-});
 
-describe("taskRunWorkflow answered input", () => {
-  function requireInput(...requestIds: readonly string[]): TaskRunInboundPayload {
-    return {
-      command: {
-        inputRequests: requestIds.map((requestId) => ({ prompt: requestId, requestId })),
-        kind: "require-input",
+  it("buffers agent requests until task dispatch is acknowledged", async () => {
+    mocks.raceChannelReads
+      .mockResolvedValueOnce({
+        channel: "workflow",
+        next: { done: false, value: bufferedAgentRequest },
+      })
+      .mockResolvedValueOnce({
+        channel: "commands",
+        next: { done: false, value: { command: { kind: "ready" }, kind: "task-command" } },
+      })
+      .mockResolvedValueOnce({ channel: "commands", next: { done: true, value: undefined } });
+
+    await taskRunWorkflow({
+      initialView,
+      parentContinuationToken: "parent-token",
+      taskInboxToken: "task-token",
+    });
+
+    expect(mocks.wakeTaskAgentRequestParentStep).toHaveBeenCalledWith({
+      request: bufferedAgentRequest,
+      taskId: "task-1",
+      token: "parent-token",
+    });
+    expect(mocks.raceChannelReads.mock.invocationCallOrder[1]).toBeLessThan(
+      mocks.wakeTaskAgentRequestParentStep.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("forwards admitted agent requests through the task's owner channel", async () => {
+    mocks.raceChannelReads
+      .mockResolvedValueOnce({
+        channel: "commands",
+        next: { done: false, value: { command: { kind: "ready" }, kind: "task-command" } },
+      })
+      .mockResolvedValueOnce({
+        channel: "workflow",
+        next: { done: false, value: workflowAgentRequest },
+      })
+      .mockResolvedValueOnce({ channel: "commands", next: { done: true, value: undefined } });
+
+    await taskRunWorkflow({
+      initialView,
+      parentContinuationToken: "parent-token",
+      taskInboxToken: "task-token",
+    });
+
+    expect(mocks.wakeTaskAgentRequestParentStep).toHaveBeenCalledWith({
+      request: workflowAgentRequest,
+      taskId: "task-1",
+      token: "parent-token",
+    });
+  });
+
+  it("does not execute a workflow body before task admission", async () => {
+    mocks.raceChannelReads.mockResolvedValueOnce({
+      channel: "commands",
+      next: { done: true, value: undefined },
+    });
+
+    await taskRunWorkflow({
+      initialView,
+      parentContinuationToken: "parent-token",
+      taskInboxToken: "task-token",
+      workflow: {
+        callId: "call-1",
+        input: {},
+        session: {
+          auth: { current: null, initiator: null },
+          id: "session-1",
+          turn: { id: "turn-1", sequence: 0 },
+        },
+        stepIndex: 0,
+        toolName: "worker",
+        workflowId: "workflow//eve//worker",
       },
-      kind: "task-command",
-    };
-  }
-
-  function answer(...requestIds: readonly string[]): TaskInboundAnswerInput {
-    return {
-      childContinuationToken: "child-token",
-      inputResponses: requestIds.map((requestId) => ({ requestId, text: "answer" })),
-      kind: "input-response",
-      taskId: "task_abc123",
-    };
-  }
-
-  it("forwards the answer to the child before recording it as unblocked", async () => {
-    vi.mocked(deliverTaskInputResponsesStep).mockResolvedValue("delivered");
-    mockCommandHook([
-      requireInput("q1"),
-      answer("q1"),
-      { command: { data: "done", kind: "complete" }, kind: "task-command" },
-    ]);
-
-    await taskRunWorkflow({
-      taskInboxToken: "task-token",
-      initialView: createWorkingView(),
-      parentContinuationToken: "parent-session-token",
     });
 
-    expect(deliverTaskInputResponsesStep).toHaveBeenCalledWith({
-      answer: answer("q1"),
-      requestIds: ["q1"],
-    });
-    expect(appendedStatuses()).toEqual(["working", "input_required", "working", "completed"]);
-    const deliveryOrder = vi.mocked(deliverTaskInputResponsesStep).mock.invocationCallOrder[0] ?? 0;
-    const unblockOrder = vi.mocked(appendTaskViewStep).mock.invocationCallOrder[2] ?? 0;
-    expect(deliveryOrder).toBeLessThan(unblockOrder);
+    expect(mocks.executeWorkflowBody).not.toHaveBeenCalled();
   });
 
-  it("never lets an answer to a superseded batch reach the child", async () => {
-    vi.mocked(deliverTaskInputResponsesStep).mockResolvedValue("delivered");
-    mockCommandHook([
-      requireInput("q1"),
-      requireInput("q2"),
-      answer("q1"),
-      { command: { data: "done", kind: "complete" }, kind: "task-command" },
-    ]);
+  it("starts the workflow body only after ready", async () => {
+    mocks.raceChannelReads
+      .mockResolvedValueOnce({
+        channel: "commands",
+        next: { done: false, value: { command: { kind: "ready" }, kind: "task-command" } },
+      })
+      .mockResolvedValueOnce({ channel: "commands", next: { done: true, value: undefined } });
 
     await taskRunWorkflow({
+      initialView,
+      parentContinuationToken: "parent-token",
       taskInboxToken: "task-token",
-      initialView: createWorkingView(),
-      parentContinuationToken: "parent-session-token",
+      workflow: {
+        callId: "call-1",
+        input: {},
+        session: {
+          auth: { current: null, initiator: null },
+          id: "session-1",
+          turn: { id: "turn-1", sequence: 0 },
+        },
+        stepIndex: 0,
+        toolName: "worker",
+        workflowId: "workflow//eve//worker",
+      },
     });
 
-    expect(deliverTaskInputResponsesStep).not.toHaveBeenCalled();
-    expect(appendedStatuses()).toEqual([
-      "working",
-      "input_required",
-      "input_required",
-      "completed",
-    ]);
+    expect(mocks.executeWorkflowBody).toHaveBeenCalledOnce();
+    expect(mocks.executeWorkflowBody).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: { inbox: "generated-owner-token" } }),
+      expect.any(AbortSignal),
+    );
   });
 
-  it("stays blocked on the requests an answer did not cover", async () => {
-    vi.mocked(deliverTaskInputResponsesStep).mockResolvedValue("delivered");
-    mockCommandHook([
-      requireInput("q1", "q2"),
-      answer("q1", "unknown"),
-      { command: { data: "done", kind: "complete" }, kind: "task-command" },
-    ]);
+  it.each(["tool", "subagent"])(
+    "routes %s progress without changing subagent delivery",
+    async (kind) => {
+      const update = {
+        callId: "call-1",
+        kind: "task-update" as const,
+        message: "progress",
+        updateEpoch: "task-1",
+        updateIndex: 0,
+      };
+      mocks.raceChannelReads
+        .mockResolvedValueOnce({ channel: "commands", next: { done: false, value: update } })
+        .mockResolvedValueOnce({
+          channel: "commands",
+          next: {
+            done: false,
+            value: {
+              command: { data: "done", kind: "complete" },
+              kind: "task-command",
+            },
+          },
+        })
+        .mockResolvedValueOnce({
+          channel: "commands",
+          next: { done: false, value: { command: { kind: "ready" }, kind: "task-command" } },
+        });
+
+      await taskRunWorkflow({
+        initialView: { ...initialView, metadata: { ...initialView.metadata, kind } },
+        parentContinuationToken: "parent-token",
+        taskInboxToken: "task-token",
+      });
+
+      if (kind === "subagent") {
+        expect(mocks.appendTaskProgressStep).not.toHaveBeenCalled();
+        expect(mocks.wakeTaskUpdateParentStep).toHaveBeenCalledWith({
+          token: "parent-token",
+          update,
+          view: expect.objectContaining({ status: "completed" }),
+        });
+        expect(mocks.wakeTaskUpdateParentStep.mock.invocationCallOrder[0]).toBeLessThan(
+          mocks.wakeTaskParentStep.mock.invocationCallOrder[0]!,
+        );
+        return;
+      }
+      expect(mocks.appendTaskProgressStep).toHaveBeenCalledWith({
+        progress: {
+          callId: "call-1",
+          kind: "task-progress",
+          taskId: "task-1",
+          update: "progress",
+          updateIndex: 0,
+        },
+      });
+      expect(mocks.wakeTaskUpdateParentStep).not.toHaveBeenCalled();
+    },
+  );
+
+  it("publishes cancellation after the workflow body observes its abort", async () => {
+    mocks.raceChannelReads
+      .mockResolvedValueOnce({
+        channel: "commands",
+        next: { done: false, value: { command: { kind: "ready" }, kind: "task-command" } },
+      })
+      .mockResolvedValueOnce({
+        channel: "commands",
+        next: { done: false, value: { command: { kind: "cancel" }, kind: "task-command" } },
+      })
+      .mockResolvedValueOnce({
+        channel: "body",
+        next: {
+          done: false,
+          value: { outcome: { reason: "cancelled", status: "cancelled" }, reportCount: 0 },
+        },
+      });
+    mocks.executeWorkflowBody.mockImplementation(
+      async (_input, signal: AbortSignal) =>
+        await new Promise((resolve) => {
+          signal.addEventListener(
+            "abort",
+            () =>
+              resolve({ outcome: { reason: "cancelled", status: "cancelled" }, reportCount: 0 }),
+            { once: true },
+          );
+        }),
+    );
 
     await taskRunWorkflow({
+      initialView,
+      parentContinuationToken: "parent-token",
       taskInboxToken: "task-token",
-      initialView: createWorkingView(),
-      parentContinuationToken: "parent-session-token",
+      workflow: {
+        callId: "call-1",
+        input: {},
+        session: {
+          auth: { current: null, initiator: null },
+          id: "session-1",
+          turn: { id: "turn-1", sequence: 0 },
+        },
+        stepIndex: 0,
+        toolName: "worker",
+        workflowId: "workflow//eve//worker",
+      },
     });
 
-    expect(deliverTaskInputResponsesStep).toHaveBeenCalledWith({
-      answer: answer("q1", "unknown"),
-      requestIds: ["q1"],
+    expect(mocks.wakeTaskParentStep).toHaveBeenCalledWith({
+      token: "parent-token",
+      view: expect.objectContaining({ status: "cancelled" }),
     });
-    const blockedAgain = vi.mocked(appendTaskViewStep).mock.calls[2]?.[0].view;
-    expect(blockedAgain?.status).toBe("input_required");
-    expect(blockedAgain?.inputRequests).toEqual([{ prompt: "q2", requestId: "q2" }]);
   });
 
-  it("keeps the task blocked when the child never received the answer", async () => {
-    vi.mocked(deliverTaskInputResponsesStep).mockResolvedValue("unreachable");
-    mockCommandHook([
-      requireInput("q1"),
-      answer("q1"),
-      { command: { data: "done", kind: "complete" }, kind: "task-command" },
-    ]);
-
+  it("consumes every persisted report before accepting a body's completion", async () => {
+    mocks.raceChannelReads
+      .mockResolvedValueOnce({
+        channel: "commands",
+        next: { done: false, value: { command: { kind: "ready" }, kind: "task-command" } },
+      })
+      .mockResolvedValueOnce({
+        channel: "body",
+        next: {
+          done: false,
+          value: { outcome: { output: "done", status: "completed" }, reportCount: 1 },
+        },
+      })
+      .mockResolvedValueOnce({
+        channel: "workflow",
+        next: {
+          done: false,
+          value: {
+            kind: "report",
+            from: bufferedAgentRequest.from,
+            update: { kind: "eve:task-message", message: "Review the export" },
+          },
+        },
+      });
     await taskRunWorkflow({
+      initialView,
+      parentContinuationToken: "parent-token",
       taskInboxToken: "task-token",
-      initialView: createWorkingView(),
-      parentContinuationToken: "parent-session-token",
+      workflow: {
+        callId: "call-1",
+        input: {},
+        session: {
+          auth: { current: null, initiator: null },
+          id: "session-1",
+          turn: { id: "turn-1", sequence: 0 },
+        },
+        stepIndex: 0,
+        toolName: "worker",
+        workflowId: "workflow//eve//worker",
+      },
     });
-
-    expect(appendedStatuses()).toEqual(["working", "input_required", "completed"]);
-  });
-
-  it("ignores an answer addressed to a different task", async () => {
-    vi.mocked(deliverTaskInputResponsesStep).mockResolvedValue("delivered");
-    mockCommandHook([
-      requireInput("q1"),
-      { ...answer("q1"), taskId: "task_other" },
-      { command: { data: "done", kind: "complete" }, kind: "task-command" },
-    ]);
-
-    await taskRunWorkflow({
-      taskInboxToken: "task-token",
-      initialView: createWorkingView(),
-      parentContinuationToken: "parent-session-token",
+    expect(mocks.wakeTaskMessageParentStep).toHaveBeenCalledWith({
+      message: expect.objectContaining({ message: "Review the export" }),
+      taskId: "task-1",
+      token: "parent-token",
     });
-
-    expect(deliverTaskInputResponsesStep).not.toHaveBeenCalled();
-    expect(appendedStatuses()).toEqual(["working", "input_required", "completed"]);
+    expect(mocks.wakeTaskMessageParentStep.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.wakeTaskParentStep.mock.invocationCallOrder[0]!,
+    );
   });
 });

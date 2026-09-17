@@ -3,7 +3,7 @@ import { EVE_SESSION_ID_HEADER, isCurrentTurnBoundaryEvent } from "#protocol/mes
 import { EVE_SESSION_ROUTE_PATH, createEveSessionRoutePath } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
 import { MessageResponse } from "#client/message-response.js";
-import { followStreamIterable } from "#client/open-stream.js";
+import { followStreamIterable, sleep } from "#client/open-stream.js";
 import {
   cancelClientSession,
   clearClientSession,
@@ -27,6 +27,9 @@ import type {
   SessionSnapshot,
   StreamOptions,
 } from "#client/types.js";
+
+const SESSION_SEND_RETRY_COUNT = 3;
+const SESSION_SEND_RETRY_BASE_DELAY_MS = 250;
 
 /**
  * Internal interface that a {@link ClientSession} uses to access client-level
@@ -55,7 +58,7 @@ export class ClientSession {
     input: SendTurnInput<TOutput>,
   ): Promise<{ readonly response: MessageResponse<TOutput>; readonly session: ClientSession }> {
     const response = await postTurn(context, EVE_SESSION_ROUTE_PATH, input, true);
-    const sessionId = await readSessionId(response);
+    const { sessionId } = await readAcceptedMessage(response);
     const session = new ClientSession(context, { sessionId, streamIndex: 0 });
 
     return {
@@ -94,7 +97,7 @@ export class ClientSession {
     message: SendTurnInput<TOutput>["message"],
     options: SendTurnOptions<TOutput> = {},
   ): Promise<MessageResponse<TOutput>> {
-    return await this.#send({ ...options, message });
+    return await this.#send({ ...options, message }, true);
   }
 
   /** Answers pending input requests on this exact session ID. */
@@ -105,28 +108,44 @@ export class ClientSession {
     if (inputResponses.length === 0) {
       throw new Error("ClientSession.respond() requires at least one input response.");
     }
-    return await this.#send({ ...options, inputResponses });
+    return await this.#send({ ...options, inputResponses }, false);
   }
 
   async #send<TOutput = unknown>(
     input: SendTurnPayload<TOutput>,
+    retrySessionNotActive: boolean,
   ): Promise<MessageResponse<TOutput>> {
     const initialStreamIndex = this.#state.streamIndex;
-    const response = await postTurn(
-      this.#context,
-      createEveSessionRoutePath(this.#state.sessionId),
-      input,
-      false,
+    const path = createEveSessionRoutePath(this.#state.sessionId);
+    const response = retrySessionNotActive
+      ? await postSessionSend(this.#context, path, input)
+      : await postTurn(this.#context, path, input, false);
+    const { sessionId: responseSessionId, deliveryId } = await readAcceptedMessage(
+      response,
+      this.#state.sessionId,
     );
-    const responseSessionId = await readSessionId(response, this.#state.sessionId);
     if (responseSessionId !== this.#state.sessionId) {
       throw new Error("Message route returned a different session id.");
     }
-    return this.#messageResponse<TOutput>(response, input, initialStreamIndex);
+    if (input.message !== undefined && deliveryId === undefined) {
+      throw new Error(
+        "Message route did not return a delivery id. Update the server before sending with this client.",
+      );
+    }
+    return this.#messageResponse<TOutput>(
+      response,
+      input,
+      initialStreamIndex,
+      input.message === undefined ? undefined : deliveryId,
+    );
   }
 
-  /** Requests cooperative cancellation of this session's active turn. */
-  async cancel(options?: { readonly turnId?: string }): Promise<CancelSessionResult> {
+  /** Requests cooperative cancellation of this session's active turn and optionally its tasks. */
+  async cancel(options?: {
+    readonly signal?: AbortSignal;
+    readonly tasks?: boolean;
+    readonly turnId?: string;
+  }): Promise<CancelSessionResult> {
     return await cancelClientSession({
       context: this.#context,
       options,
@@ -145,7 +164,10 @@ export class ClientSession {
   }
 
   /** Terminally retires this exact session ID. The handle remains pinned to it. */
-  async reset(options?: { readonly reason?: string }): Promise<ResetResult> {
+  async reset(options?: {
+    readonly reason?: string;
+    readonly signal?: AbortSignal;
+  }): Promise<ResetResult> {
     return await resetClientSession({
       context: this.#context,
       options,
@@ -167,11 +189,12 @@ export class ClientSession {
     response: Response,
     input: SendTurnPayload,
     initialStreamIndex: number,
+    deliveryId?: string,
   ): MessageResponse<TOutput> {
     response.body?.cancel().catch(() => {});
     return new MessageResponse<TOutput>({
       cancelTurn: async (turnId) => await this.cancel({ turnId }),
-      createStream: () => this.#createEventStream(initialStreamIndex, input),
+      createStream: () => this.#createEventStream(initialStreamIndex, input, deliveryId),
       sessionId: this.#state.sessionId,
     });
   }
@@ -179,8 +202,11 @@ export class ClientSession {
   async *#createEventStream(
     initialStreamIndex: number,
     input: SendTurnPayload,
+    deliveryId?: string,
   ): AsyncGenerator<MessageStreamEvent> {
     let eventCount = 0;
+    let started = deliveryId === undefined;
+    let reachedBoundary = false;
     const pendingAuthorizations = new Set<string>();
     try {
       for await (const event of this.#readStream({
@@ -191,23 +217,40 @@ export class ClientSession {
         streamReconnectPolicy: input.streamReconnectPolicy,
       })) {
         eventCount += 1;
+        if (deliveryId !== undefined) {
+          const matches = event.meta?.deliveryIds?.includes(deliveryId) === true;
+          const terminal = event.type === "session.failed" || event.type === "session.completed";
+          if (!matches && terminal && (!started || event.type === "session.completed")) {
+            throw new Error(
+              "The session ended before the accepted message reached its turn boundary.",
+            );
+          }
+          if (!started && !matches) continue;
+          if (!terminal && event.meta?.deliveryIds !== undefined && !matches) continue;
+          started = true;
+        }
         if (event.type === "authorization.required" && event.data.webhookUrl !== undefined) {
           pendingAuthorizations.add(event.data.name);
         } else if (event.type === "authorization.completed") {
           pendingAuthorizations.delete(event.data.name);
         }
-        yield event;
-        if (
+        reachedBoundary =
           isCurrentTurnBoundaryEvent(event) &&
-          (event.type !== "session.waiting" || pendingAuthorizations.size === 0)
-        ) {
+          (event.type !== "session.waiting" || pendingAuthorizations.size === 0);
+        yield event;
+        if (reachedBoundary) {
           break;
         }
+      }
+      if (deliveryId !== undefined && !reachedBoundary && !input.signal?.aborted) {
+        throw new Error(
+          "The response stream ended before the accepted message reached its turn boundary.",
+        );
       }
     } finally {
       this.#state = {
         sessionId: this.#state.sessionId,
-        streamIndex: initialStreamIndex + eventCount,
+        streamIndex: Math.max(this.#state.streamIndex, initialStreamIndex + eventCount),
       };
     }
   }
@@ -257,6 +300,31 @@ export class ClientSession {
   }
 }
 
+async function postSessionSend(
+  context: ClientSessionContext,
+  path: string,
+  input: SendTurnPayload,
+): Promise<Response> {
+  let retryDelayMs = SESSION_SEND_RETRY_BASE_DELAY_MS;
+  for (let retry = 0; ; retry += 1) {
+    try {
+      return await postTurn(context, path, input, false);
+    } catch (error) {
+      if (!isSessionNotActive(error) || retry >= SESSION_SEND_RETRY_COUNT) throw error;
+    }
+
+    await sleep(retryDelayMs, input.signal);
+    input.signal?.throwIfAborted();
+    retryDelayMs *= 2;
+  }
+}
+
+function isSessionNotActive(error: unknown): error is ClientError {
+  return (
+    error instanceof ClientError && error.status === 409 && error.code === "session_not_active"
+  );
+}
+
 function shouldKeepActiveTurnAlive(policy: StreamOptions["streamReconnectPolicy"]): boolean {
   if (policy && "reconnect" in policy) {
     return false;
@@ -296,14 +364,26 @@ async function postTurn(
   return response;
 }
 
-async function readSessionId(response: Response, expected?: string): Promise<string> {
+async function readAcceptedMessage(
+  response: Response,
+  expected?: string,
+): Promise<{
+  readonly sessionId: string;
+  readonly deliveryId?: string;
+}> {
   const payload = (await response.json()) as Record<string, unknown>;
   const sessionId =
     (typeof payload.sessionId === "string" ? payload.sessionId : undefined) ??
     response.headers.get(EVE_SESSION_ID_HEADER)?.trim() ??
     expected;
   if (!sessionId) throw new Error("Message route did not return a session id.");
-  return sessionId;
+  return {
+    sessionId,
+    deliveryId:
+      typeof payload.deliveryId === "string" && payload.deliveryId.length > 0
+        ? payload.deliveryId
+        : undefined,
+  };
 }
 
 function createMessageBody(

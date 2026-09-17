@@ -4,49 +4,106 @@
   "homepage": "https://eve.dev",
   "items": [
     {
-      "name": "linear",
+      "name": "eve/self-modification",
       "type": "registry:item",
-      "title": "Linear",
-      "description": "Receive delegated Linear work and give your agent tools for issues, projects, and comments.",
+      "title": "Self-modification",
+      "description": "Add a source editing subagent with local edits and official registry installation.",
+      "dependencies": ["just-bash", "@vercel/connect"],
       "meta": {
         "eve": {
-          "requires": ">=0.30.6",
-          "components": [
+          "requires": ">=0.54.4",
+          "install": {
+            "pnpm": {
+              "buildScripts": [
+                {
+                  "packages": ["node-liblzma", "@mongodb-js/zstd"],
+                  "optional": true,
+                  "recommendedAction": "ignore-optional",
+                  "reason": "These optional just-bash compression accelerators are not required by the self-modification agent."
+                }
+              ]
+            }
+          },
+          "setup": [
             {
-              "item": "channel/linear-agent",
-              "label": "Linear Channel",
-              "description": "Interact with your eve agent natively in Linear",
-              "default": true
-            },
-            {
-              "item": "connection/linear",
-              "label": "Linear MCP",
-              "description": "Use the Linear MCP",
-              "default": true
+              "package": "eve",
+              "bin": "eve",
+              "args": ["integration", "setup", "self-modification-production"]
             }
           ]
         }
-      }
+      },
+      "files": [
+        {
+          "path": "registry/eve/self-modification/config.ts",
+          "type": "registry:file",
+          "target": "agent/subagents/self-modification/config.ts"
+        },
+        {
+          "path": "registry/eve/self-modification/agent.ts",
+          "type": "registry:file",
+          "target": "agent/subagents/self-modification/agent.ts"
+        },
+        {
+          "path": "registry/eve/self-modification/sandbox.ts",
+          "type": "registry:file",
+          "target": "agent/subagents/self-modification/sandbox.ts"
+        },
+        {
+          "path": "registry/eve/self-modification/extension.ts",
+          "type": "registry:file",
+          "target": "agent/subagents/self-modification/extensions/selfmod.ts"
+        }
+      ]
     },
     {
       "name": "experimental/self-modification",
       "type": "registry:item",
       "title": "Self-modification (Experimental)",
-      "description": "Add an experimental, development-only source editing subagent to an eve project.",
-      "dependencies": ["@eve/self-modification"],
+      "description": "Add an experimental source editing subagent with local edits and official registry installation.",
+      "dependencies": ["just-bash", "@vercel/connect"],
+      "meta": {
+        "eve": {
+          "hidden": true,
+          "install": {
+            "pnpm": {
+              "buildScripts": [
+                {
+                  "packages": ["node-liblzma", "@mongodb-js/zstd"],
+                  "optional": true,
+                  "recommendedAction": "ignore-optional",
+                  "reason": "These optional just-bash compression accelerators are not required by the self-modification agent."
+                }
+              ]
+            }
+          },
+          "setup": [
+            {
+              "package": "eve",
+              "bin": "eve",
+              "args": ["integration", "setup", "self-modification"]
+            }
+          ]
+        }
+      },
       "files": [
         {
-          "path": "registry/experimental/self-modification/agent.ts",
+          "path": "registry/eve/self-modification/config.ts",
+          "type": "registry:file",
+          "target": "agent/subagents/self-modification/config.ts"
+        },
+        {
+          "path": "registry/eve/self-modification/agent.ts",
           "type": "registry:file",
           "target": "agent/subagents/self-modification/agent.ts"
         },
         {
-          "path": "registry/experimental/self-modification/sandbox.ts",
+          "path": "registry/eve/self-modification/sandbox.ts",
           "type": "registry:file",
           "target": "agent/subagents/self-modification/sandbox.ts"
         },
         {
-          "path": "registry/experimental/self-modification/extension.ts",
+          "path": "registry/eve/self-modification/extension.ts",
           "type": "registry:file",
           "target": "agent/subagents/self-modification/extensions/selfmod.ts"
         }
@@ -153,38 +210,94 @@
       ]
     },
     {
-      "name": "extension/upstash-agentkit",
+      "name": "memory/file",
       "type": "registry:item",
-      "title": "Upstash AgentKit",
-      "description": "Add long-term memory, Redis Search, and durable chat history with Upstash Redis.",
-      "dependencies": ["@upstash/agentkit-eve-extension"],
-      "envVars": {
-        "UPSTASH_REDIS_REST_URL": "",
-        "UPSTASH_REDIS_REST_TOKEN": ""
+      "title": "File memory",
+      "description": "Store durable per-principal memory in a private Vercel Blob store. Setup connects production, preview, and development in the project's primary function region; Blob usage may incur charges.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "file-memory"]
+          },
+          "requires": ">=0.49.1",
+          "docs": "/docs/memory/file"
+        }
       },
       "files": [
         {
-          "path": "registry/extensions/upstash-agentkit.ts",
+          "path": "registry/memory/file.ts",
           "type": "registry:file",
-          "target": "agent/extensions/agentkit.ts"
+          "target": "agent/memory/file.ts"
         }
       ]
     },
     {
-      "name": "extension/arcana",
+      "name": "memory/supermemory",
+      "type": "registry:item",
+      "title": "Supermemory",
+      "description": "Give your agents long-term memory, user profiles, and SuperRAG across conversations and context.",
+      "dependencies": ["@supermemory/eve"],
+      "envVars": {
+        "SUPERMEMORY_API_KEY": ""
+      },
+      "meta": {
+        "eve": {
+          "requires": ">=0.47.3"
+        }
+      },
+      "files": [
+        {
+          "path": "registry/memory/supermemory.ts",
+          "type": "registry:file",
+          "target": "agent/memory/supermemory.ts"
+        }
+      ]
+    },
+    {
+      "name": "memory/upstash-agentkit",
+      "type": "registry:item",
+      "title": "Upstash AgentKit",
+      "description": "Give your agents ranked recall and automatic capture on Upstash Redis, or a Redis backend for file memory.",
+      "dependencies": ["@upstash/agentkit-eve", "@upstash/redis"],
+      "envVars": {
+        "UPSTASH_REDIS_REST_URL": "",
+        "UPSTASH_REDIS_REST_TOKEN": ""
+      },
+      "meta": {
+        "eve": {
+          "requires": ">=0.45.2"
+        }
+      },
+      "files": [
+        {
+          "path": "registry/memory/upstash-agentkit.ts",
+          "type": "registry:file",
+          "target": "agent/memory/upstash-agentkit.ts"
+        }
+      ]
+    },
+    {
+      "name": "memory/arcana",
       "type": "registry:item",
       "title": "Kybernesis Arcana",
-      "description": "Give an eve agent a workspace-scoped long-term memory with recall, storage, and brain notes.",
+      "description": "Give your agents workspace-scoped long-term memory with automatic recall and deliberate storage.",
       "dependencies": ["@kybernesis/arcana"],
       "envVars": {
         "ARCANA_API_KEY": "",
         "ARCANA_WORKSPACE": ""
       },
+      "meta": {
+        "eve": {
+          "requires": ">=0.49.0"
+        }
+      },
       "files": [
         {
-          "path": "registry/extensions/arcana.ts",
+          "path": "registry/memory/arcana.ts",
           "type": "registry:file",
-          "target": "agent/extensions/arcana.ts"
+          "target": "agent/memory/arcana.ts"
         }
       ]
     },
@@ -209,6 +322,175 @@
           "path": "registry/extensions/hindsight-hook.ts",
           "type": "registry:file",
           "target": "agent/hooks/hindsight.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/agent",
+      "type": "registry:item",
+      "title": "Agent",
+      "description": "Add root-agent background delegation.",
+      "files": [
+        {
+          "path": "registry/tools/agent.ts",
+          "type": "registry:file",
+          "target": "agent/tools/agent.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/ask_question",
+      "type": "registry:item",
+      "title": "Ask Question",
+      "description": "Let the agent ask the user a question during a turn.",
+      "files": [
+        {
+          "path": "registry/tools/ask_question.ts",
+          "type": "registry:file",
+          "target": "agent/tools/ask_question.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/bash",
+      "type": "registry:item",
+      "title": "Bash",
+      "description": "Run shell commands in the agent sandbox.",
+      "files": [
+        {
+          "path": "registry/tools/bash.ts",
+          "type": "registry:file",
+          "target": "agent/tools/bash.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/load_skill",
+      "type": "registry:item",
+      "title": "Load Skill",
+      "description": "Load instructions from an agent skill.",
+      "files": [
+        {
+          "path": "registry/tools/load_skill.ts",
+          "type": "registry:file",
+          "target": "agent/tools/load_skill.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/read_file",
+      "type": "registry:item",
+      "title": "Read File",
+      "description": "Read text files from the agent sandbox.",
+      "files": [
+        {
+          "path": "registry/tools/read_file.ts",
+          "type": "registry:file",
+          "target": "agent/tools/read_file.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/task_cancel",
+      "type": "registry:item",
+      "title": "Task Cancel",
+      "description": "Cancel background tasks from the root session.",
+      "files": [
+        {
+          "path": "registry/tools/task_cancel.ts",
+          "type": "registry:file",
+          "target": "agent/tools/task_cancel.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/todo",
+      "type": "registry:item",
+      "title": "Todo",
+      "description": "Maintain a durable per-session todo list.",
+      "files": [
+        {
+          "path": "registry/tools/todo.ts",
+          "type": "registry:file",
+          "target": "agent/tools/todo.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/web_fetch",
+      "type": "registry:item",
+      "title": "Web Fetch",
+      "description": "Fetch a URL from the app runtime.",
+      "files": [
+        {
+          "path": "registry/tools/web_fetch.ts",
+          "type": "registry:file",
+          "target": "agent/tools/web_fetch.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/web_search",
+      "type": "registry:item",
+      "title": "Web Search",
+      "description": "Search the web through the model provider.",
+      "files": [
+        {
+          "path": "registry/tools/web_search.ts",
+          "type": "registry:file",
+          "target": "agent/tools/web_search.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/write_file",
+      "type": "registry:item",
+      "title": "Write File",
+      "description": "Write complete files in the agent sandbox.",
+      "files": [
+        {
+          "path": "registry/tools/write_file.ts",
+          "type": "registry:file",
+          "target": "agent/tools/write_file.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/glob",
+      "type": "registry:item",
+      "title": "Glob",
+      "description": "Find sandbox files by glob pattern.",
+      "files": [
+        {
+          "path": "registry/tools/glob.ts",
+          "type": "registry:file",
+          "target": "agent/tools/glob.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/grep",
+      "type": "registry:item",
+      "title": "Grep",
+      "description": "Search sandbox file contents with a regular expression.",
+      "files": [
+        {
+          "path": "registry/tools/grep.ts",
+          "type": "registry:file",
+          "target": "agent/tools/grep.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/sleep",
+      "type": "registry:item",
+      "title": "Sleep",
+      "description": "Pause and durably resume the current turn.",
+      "files": [
+        {
+          "path": "registry/tools/sleep.ts",
+          "type": "registry:file",
+          "target": "agent/tools/sleep.ts"
         }
       ]
     },
@@ -239,7 +521,15 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": ["integration", "connect", "vercel", "vercel", "vercel"]
+            "args": [
+              "integration",
+              "connect",
+              "vercel",
+              "vercel",
+              "vercel",
+              "--connection-method",
+              "mcp"
+            ]
           },
           "requires": ">=0.29.0"
         }
@@ -840,6 +1130,31 @@
       ]
     },
     {
+      "name": "connection/neon",
+      "type": "registry:item",
+      "title": "Neon",
+      "description": "Manage Neon projects, run queries, and make schema changes.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "neon", "neon", "neon", "--principal-type", "app"]
+          },
+          "requires": ">=0.48.0"
+        }
+      },
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/neon.ts",
+          "type": "registry:file",
+          "target": "agent/connections/neon.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/netlify",
       "type": "registry:item",
       "title": "Netlify",
@@ -1174,9 +1489,17 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": ["integration", "connect", "tinybird", "tinybird", "tinybird"]
+            "args": [
+              "integration",
+              "connect",
+              "tinybird",
+              "tinybird",
+              "tinybird",
+              "--principal-type",
+              "app"
+            ]
           },
-          "requires": ">=0.29.0"
+          "requires": ">=0.48.0"
         }
       },
       "dependencies": ["@vercel/connect"],
@@ -1357,24 +1680,22 @@
       "name": "channel/teams",
       "type": "registry:item",
       "title": "Microsoft Teams",
-      "description": "Bring your agent into Teams chats and channels.",
-      "envVars": {
-        "TEAMS_APP_ID": "",
-        "TEAMS_APP_PASSWORD": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/teams.ts",
-          "type": "registry:file",
-          "target": "agent/channels/teams.ts"
-        }
-      ],
+      "description": "Run an eve agent as a managed Microsoft Teams bot, with guided Vercel Connect setup.",
       "meta": {
         "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "teams"]
+          },
+          "requires": ">=0.53.0",
           "docs": "/docs/channels/teams",
           "implementation": "native"
         }
-      }
+      },
+      "dependencies": ["@vercel/connect@>=2.1.0"],
+      "devDependencies": ["vercel@>=58.5.1"]
     },
     {
       "name": "channel/telegram",
@@ -1467,7 +1788,7 @@
       "devDependencies": ["vercel@>=58.5.1"]
     },
     {
-      "name": "channel/linear-agent",
+      "name": "channel/linear",
       "type": "registry:item",
       "title": "Linear Agent",
       "description": "Delegate Linear issues and comments through Agent Sessions, with guided Vercel Connect setup.",
@@ -1530,7 +1851,7 @@
         "tailwind-merge@3.6.0",
         "tailwindcss@4.3.0",
         "use-stick-to-bottom@1.1.4",
-        "zod@4.4.3"
+        "zod@4.5.4"
       ],
       "devDependencies": [
         "@types/node@26",

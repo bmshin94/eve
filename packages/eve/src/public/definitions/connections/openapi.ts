@@ -65,7 +65,7 @@ export interface OpenAPIConnectionDefinition {
    * `Authorization: Bearer <token>`.
    *
    * - `getToken`-only: covers static API keys, pre-provisioned tokens,
-   *   and out-of-band OAuth. Defaults to `principalType: "app"` when
+   *   and out-of-band OAuth. Defaults to `credentialOwner: "app"` when
    *   omitted.
    * - Three-method form: provide `startAuthorization` and
    *   `completeAuthorization` together to opt into interactive OAuth.
@@ -75,6 +75,14 @@ export interface OpenAPIConnectionDefinition {
    * Optional when `headers` is provided for non-Bearer auth schemes.
    */
   auth?: ConnectionAuthDefinition;
+  /**
+   * Stable, non-secret identity for the resolved connection instance.
+   *
+   * Authenticated dynamic connections must set this to an account or tenant
+   * identifier that changes whenever the endpoint or auth provider changes.
+   * eve hashes the value before storing it in durable authorization state.
+   */
+  readonly instanceKey?: string;
   /**
    * Optional per-connection approval gate for connection tool calls.
    *

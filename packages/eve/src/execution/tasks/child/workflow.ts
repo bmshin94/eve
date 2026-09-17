@@ -1,244 +1,424 @@
 import { createHook } from "#compiled/@workflow/core/index.js";
 
-import type { SubagentAuthorizationEventHookPayload } from "#channel/types.js";
-import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
+import type { ActivityObserverConfig } from "#channel/types.js";
+import { claimHookOwnership, isHookConflictError } from "#execution/hook-ownership.js";
 import {
+  appendTaskProgressStep,
   appendTaskViewStep,
   deliverTaskInputResponsesStep,
+  wakeTaskAgentRequestParentStep,
   wakeTaskAuthorizationParentStep,
-  wakeTaskInputRequestParentStep,
+  wakeTaskMessageParentStep,
   wakeTaskParentStep,
   wakeTaskUpdateParentStep,
+  wakeWorkflowTaskInputRequestParentStep,
 } from "#execution/tasks/child/steps.js";
+import {
+  createWorkflowBodyRef,
+  executeWorkflowBody,
+  type WorkflowBodyDefinition,
+  type WorkflowBodyResult,
+} from "#execution/tools/workflow/body.js";
+import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
+import type {
+  WorkflowToolAuthorizationRequest,
+  WorkflowToolRunRequestMessage,
+} from "#execution/tools/workflow/messages.js";
+import { createChannelReader, raceChannelReads } from "#execution/tools/workflow/owner-channels.js";
+import { openWorkflowToolRunOwnerInbox } from "#execution/tools/workflow/owner.js";
+import {
+  workflowToolRunOutcomeToTaskCommand,
+  workflowToolRunReportToTaskPayload,
+  workflowToolRunRequestToTaskInputRequest,
+} from "#execution/tools/workflow/owner-inbox.js";
+import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import { applyTaskTransition } from "#tasks/transitions.js";
-import { translateTaskInboundPayload } from "#tasks/wire.js";
 import {
   isReadyTaskStatus,
   isTerminalTaskStatus,
   readTaskInputRequestId,
-  readTaskUsage,
   type TaskCommand,
   type TaskInboundAnswerInput,
-  type TaskInboundAuthorizationEvent,
-  type TaskInboundInputRequest,
+  type TaskInboundMessage,
+  type TaskInputRequest,
   type TaskInboundUpdate,
   type TaskRunInboundPayload,
   type TaskView,
 } from "#tasks/types.js";
 
-/** Input for one durable task run. */
 export interface TaskRunWorkflowInput {
-  /** Private task inbox token; a routing credential, never model-visible. */
-  readonly taskInboxToken: string;
-  /** The creation view, normally `working`. */
+  readonly activityObserver?: ActivityObserverConfig;
   readonly initialView: TaskView;
-  /** Parent session delivery token used to wake the task's owning parent. */
   readonly parentContinuationToken: string;
+  readonly taskInboxToken: string;
+  readonly workflow?: WorkflowBodyDefinition;
 }
 
-type TaskRunHookPayload = TaskRunInboundPayload | SubagentAuthorizationEventHookPayload;
-
-function isTaskRunFinished(view: TaskView, dispatchAcknowledged: boolean): boolean {
-  if (!isTerminalTaskStatus(view.status) || !dispatchAcknowledged) return false;
-
-  // Cancellation makes the task terminal before the child executor has
-  // necessarily unwound. Keep its hook open until the final result settles it.
-  return view.status !== "cancelled" || view.executor?.lifecycle === "terminal";
+/** A workflow-body question routed through the task that owns the workflow tool run. */
+interface WorkflowToolRunTaskInputRequestBase {
+  readonly kind: "task-input-request";
+  readonly replyTo: string;
+  readonly sequence: number;
+  readonly stepIndex: number;
+  readonly turnId: string;
 }
 
-/**
- * The durable task run: single writer for one task's lifecycle.
- *
- * Consumes commands and child wire payloads over its private hook,
- * applies the pure transition function, and appends a full `TaskView`
- * per accepted command to its `eve.task` run stream. Competing
- * completion, cancellation, and input transitions serialize here;
- * rejected commands (for example a late child result after `cancelled`)
- * change nothing.
- *
- * Wake policy: a transition into a ready status — terminal or
- * `input_required` — and an explicit child `task_update` deliver a
- * framework notification to the parent session. A parked parent starts
- * a turn; an active turn observes the delivery at its next safe boundary.
- *
- * The run ends when the task reaches a terminal status. Its view
- * stream stays readable, so terminal tasks remain peekable; the
- * disposed hook makes any later command fail loudly instead of queueing
- * against a finished task.
- */
+export type WorkflowToolRunTaskInputRequest = WorkflowToolRunTaskInputRequestBase &
+  (
+    | { readonly request: TaskInputRequest; readonly requests?: never }
+    | { readonly request?: never; readonly requests: readonly TaskInputRequest[] }
+  );
+
+interface PendingWorkflowToolTraffic {
+  readonly messages: TaskInboundMessage[];
+  readonly ownerRequests: WorkflowToolRunRequestMessage[];
+}
+
+/** Owns lifecycle for one background task and consumes its executor traffic. */
 export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void> {
   "use workflow";
 
-  const commands = createHook<TaskRunHookPayload>({ token: input.taskInboxToken });
-  // The iterator shares the hook's durable cursor; create it before
-  // claiming so conflict replay is consumed by getConflict(), not a
-  // later iterator read.
-  const iterator = commands[Symbol.asyncIterator]();
-  let ownsHook = false;
+  const commands = createHook<TaskRunInboundPayload>({ token: input.taskInboxToken });
+  const workflowToolRunInbox = openWorkflowToolRunOwnerInbox();
+  const readers = [workflowToolRunInbox.reader, createChannelReader("commands", commands)] as const;
+  let view = input.initialView;
+  let dispatchAcknowledged = false;
+  let dispatchRejected = false;
+  let pendingInputRequest: WorkflowToolRunTaskInputRequest | undefined;
+  let pendingUpdates: TaskInboundUpdate[] = [];
+  let updateIndex = 0;
+  const pendingTraffic: PendingWorkflowToolTraffic = { messages: [], ownerRequests: [] };
+  const answerHooks = new Map<string, AnswerHookRoute>();
+  const bodyController = new AbortController();
+  let bodyReader:
+    | import("#execution/tools/workflow/owner-channels.js").ChannelReader<
+        "body",
+        WorkflowBodyResult
+      >
+    | undefined;
+  let executorSettled = input.workflow === undefined;
+  let pendingBodyResult: WorkflowBodyResult | undefined;
 
   try {
-    try {
-      await claimHookOwnership(commands);
-      ownsHook = true;
-    } catch (error) {
-      // A duplicate start for the same task (crash between the start
-      // side effect and its step commit) loses the claim and exits;
-      // the surviving run owns the lifecycle.
-      if (isHookConflictError(error)) return;
-      throw error;
+    await claimHookOwnership(commands);
+  } catch (error) {
+    if (isHookConflictError(error)) return;
+    throw error;
+  }
+
+  await appendTaskViewStep({ activityObserver: input.activityObserver, view });
+  while (true) {
+    // Hook persistence does not mean the owner has consumed every report yet.
+    if (pendingBodyResult !== undefined && updateIndex >= pendingBodyResult.reportCount) {
+      executorSettled = true;
+      await applyPayload({
+        command: workflowToolRunOutcomeToTaskCommand({
+          from: createWorkflowBodyRef({ ...input.workflow!, execution: "background" }),
+          result: pendingBodyResult.outcome,
+        }),
+        kind: "task-command",
+      });
+      pendingBodyResult = undefined;
+      if (view.status === "cancelled" && dispatchAcknowledged && !dispatchRejected) {
+        await wakeTaskParentStep({ token: input.parentContinuationToken, view });
+      }
+    }
+    if (isFinished()) break;
+    const read = await raceChannelReads(
+      bodyReader === undefined ? readers : [...readers, bodyReader],
+    );
+    if (read.channel === "body") {
+      bodyReader = undefined;
+      if (read.next.done) continue;
+      pendingBodyResult = read.next.value;
+      continue;
+    }
+    if (read.next.done) return;
+
+    if (read.channel === "workflow") {
+      const message = read.next.value;
+      if (message.kind === "report") {
+        await applyPayload(workflowToolRunReportToTaskPayload(message, view.taskId, updateIndex++));
+        continue;
+      }
+      if (message.kind === "outcome") {
+        await applyPayload({
+          command: workflowToolRunOutcomeToTaskCommand(message),
+          kind: "task-command",
+        });
+        continue;
+      }
+      const request = message;
+      const kind = request.request.kind;
+      if (kind === "agent-invoke" || kind === "agent-settled" || kind === "authorization-request") {
+        await handleOwnerRequest(request);
+        continue;
+      }
+      if (request.requestCoordinates === undefined) {
+        answerHooks.set(request.replyTo, { runId: request.from.runId });
+      }
+      await applyPayload(workflowToolRunRequestToTaskInputRequest(request));
+      continue;
     }
 
-    let view = input.initialView;
-    let pendingInputRequest: TaskInboundInputRequest | undefined;
-    let pendingAuthorizationEvents: TaskInboundAuthorizationEvent[] = [];
-    let pendingUpdates: TaskInboundUpdate[] = [];
-    let dispatchAcknowledged = false;
-    await appendTaskViewStep({ view });
+    await applyPayload(read.next.value);
+  }
 
-    while (!isTaskRunFinished(view, dispatchAcknowledged)) {
-      const next = await iterator.next();
-      if (next.done === true) return;
-      const payload: TaskRunInboundPayload =
-        next.value.kind === "subagent-authorization-event"
-          ? { ...next.value, kind: "authorization-event" }
-          : next.value;
-      // Approval lifecycle events (`approval.candidate`/`approval.settled`)
-      // are intra-child responder bookkeeping, not task blockers: only
-      // `authorization.required`/`authorization.completed` may block or
-      // unblock a task. Forwarding them would mint bogus `answered`
-      // commands and race the terminal wake.
-      if (
-        payload.kind === "authorization-event" &&
-        (payload.event.type === "approval.candidate" || payload.event.type === "approval.settled")
-      ) {
-        continue;
-      }
-      const isReadinessCommand =
-        payload.kind === "task-command" && payload.command.kind === "ready";
-      const isRejectedDispatch =
-        payload.kind === "task-command" && payload.command.kind === "reject-dispatch";
-      if (isReadinessCommand || isRejectedDispatch) dispatchAcknowledged = true;
-      if (payload.kind === "subagent-input-request") {
-        pendingInputRequest = payload;
-      }
-      if (payload.kind === "authorization-event") {
-        pendingAuthorizationEvents.push(payload);
-      }
-      if (payload.kind === "task-update") {
-        if (dispatchAcknowledged && !isTerminalTaskStatus(view.status)) {
-          await wakeTaskUpdateParentStep({
-            token: input.parentContinuationToken,
-            update: payload,
-            view,
-          });
-        } else {
-          pendingUpdates.push(payload);
-        }
-        continue;
-      }
-      const isExecutorResultAfterCancellation =
-        view.status === "cancelled" && payload.kind === "runtime-action-result";
-      const isTaskInputAnswer = payload.kind === "input-response";
-      let command: TaskCommand | undefined;
+  function isFinished(): boolean {
+    return isTerminalTaskStatus(view.status) && dispatchAcknowledged && executorSettled;
+  }
 
-      if (isExecutorResultAfterCancellation) {
-        command = {
-          kind: "settle-executor",
-          usage: readTaskUsage(payload.results[0]?.outcome?.usageDelta),
-        };
-      } else if (isTaskInputAnswer) {
-        if (view.status !== "input_required") continue;
-        command = await resolveAnsweredCommand(view, payload);
+  async function handleUpdate(update: TaskInboundUpdate): Promise<void> {
+    if (view.metadata.kind === "subagent") {
+      if (dispatchRejected) return;
+      if (dispatchAcknowledged && !isTerminalTaskStatus(view.status)) {
+        await wakeTaskUpdateParentStep({ token: input.parentContinuationToken, update, view });
       } else {
-        command = translateTaskInboundPayload(payload);
+        pendingUpdates.push(update);
       }
-      if (command === undefined) continue;
-      if (isReadinessCommand && isTerminalTaskStatus(view.status)) {
-        for (const update of pendingUpdates) {
-          await wakeTaskUpdateParentStep({
-            token: input.parentContinuationToken,
-            update,
-            view,
-          });
-        }
-        pendingUpdates = [];
-        await wakeTaskParentStep({ token: input.parentContinuationToken, view });
-        continue;
-      }
-      const result = applyTaskTransition(view, command);
-      if (result.action !== "accepted") continue;
-      const becameTerminal =
-        !isTerminalTaskStatus(view.status) && isTerminalTaskStatus(result.view.status);
-      const becameReady = !isReadyTaskStatus(view.status) && isReadyTaskStatus(result.view.status);
-      view = result.view;
-      await appendTaskViewStep({ view });
-      const routableAuthorizationEvents =
-        dispatchAcknowledged && !becameTerminal ? pendingAuthorizationEvents : [];
-      for (const request of routableAuthorizationEvents) {
-        await wakeTaskAuthorizationParentStep({
-          request,
-          taskId: view.taskId,
-          token: input.parentContinuationToken,
-        });
-      }
-      if (dispatchAcknowledged && pendingUpdates.length > 0 && !isTerminalTaskStatus(view.status)) {
-        for (const update of pendingUpdates) {
-          await wakeTaskUpdateParentStep({
-            token: input.parentContinuationToken,
-            update,
-            view,
-          });
-        }
-        pendingUpdates = [];
-      }
-      if (becameTerminal || routableAuthorizationEvents.length > 0) pendingAuthorizationEvents = [];
-      const routableInputRequest =
-        pendingInputRequest !== undefined &&
-        dispatchAcknowledged &&
-        view.status === "input_required";
-      if (routableInputRequest) {
-        await wakeTaskInputRequestParentStep({
-          request: pendingInputRequest as TaskInboundInputRequest,
-          taskId: view.taskId,
-          token: input.parentContinuationToken,
-        });
-        pendingInputRequest = undefined;
-      } else if (
-        !isRejectedDispatch &&
-        routableAuthorizationEvents.length === 0 &&
-        dispatchAcknowledged &&
-        (becameTerminal || (becameReady && pendingInputRequest === undefined))
-      ) {
-        await wakeTaskParentStep({ token: input.parentContinuationToken, view });
-      }
-      // An unrouted request cannot outlive the block it described, or a
-      // later block would replay it to the parent as if it were new.
-      if (view.status !== "input_required") pendingInputRequest = undefined;
+      return;
     }
-  } finally {
-    // Dispose-only teardown: `iterator.return()` would await a pending
-    // durable read that never settles, leaving this run `running`
-    // forever and its hook unswept.
-    if (ownsHook) await disposeHook(commands);
+    await appendTaskProgressStep({
+      progress: {
+        callId: update.callId,
+        kind: "task-progress",
+        taskId: view.taskId,
+        update: update.message,
+        updateIndex: update.updateIndex,
+      },
+    });
+  }
+
+  async function handleMessage(message: TaskInboundMessage): Promise<void> {
+    if (dispatchRejected || isTerminalTaskStatus(view.status)) return;
+    if (!dispatchAcknowledged) {
+      pendingTraffic.messages.push(message);
+      return;
+    }
+    await wakeTaskMessageParentStep({
+      message,
+      taskId: view.taskId,
+      token: input.parentContinuationToken,
+    });
+  }
+
+  async function applyPayload(
+    payload: TaskRunInboundPayload | WorkflowToolRunTaskInputRequest,
+  ): Promise<void> {
+    const isReady = payload.kind === "task-command" && payload.command.kind === "ready";
+    const isRejected =
+      payload.kind === "task-command" && payload.command.kind === "reject-dispatch";
+    if (isReady || isRejected) dispatchAcknowledged = true;
+    if (isRejected) dispatchRejected = true;
+    if (isReady || isRejected) {
+      if (isRejected || isTerminalTaskStatus(view.status)) {
+        executorSettled = true;
+      } else if (
+        input.workflow !== undefined &&
+        bodyReader === undefined &&
+        pendingBodyResult === undefined &&
+        !executorSettled
+      ) {
+        bodyReader = createChannelReader(
+          "body",
+          awaitBodyResult(
+            executeWorkflowBody(
+              {
+                ...input.workflow,
+                execution: "background",
+                owner: workflowToolRunInbox.owner,
+              },
+              bodyController.signal,
+            ),
+          ),
+        );
+      }
+      await flushPendingTraffic();
+    }
+
+    if (payload.kind === "task-input-request") pendingInputRequest = payload;
+    if (payload.kind === "task-message") {
+      await handleMessage(payload);
+      return;
+    }
+    if (payload.kind === "task-update") {
+      await handleUpdate(payload);
+      return;
+    }
+
+    let command: TaskCommand | undefined;
+    if (payload.kind === "input-response") {
+      command =
+        view.status === "input_required"
+          ? await resolveAnsweredCommand(
+              view,
+              payload,
+              answerHooks.get(payload.childContinuationToken),
+            )
+          : undefined;
+    } else if (payload.kind === "task-input-request") {
+      command = {
+        inputRequests: payload.requests ?? [payload.request],
+        kind: "require-input",
+      };
+    } else if (payload.kind === "task-command") {
+      command = payload.command;
+    } else {
+      return;
+    }
+    if (command === undefined) return;
+    if (isReady && isTerminalTaskStatus(view.status)) {
+      await flushUpdates(true);
+      await wakeTaskParentStep({ token: input.parentContinuationToken, view });
+      return;
+    }
+
+    const previous = view;
+    const accepted = await transitionTask(command);
+    if (!accepted) return;
+    if (command.kind === "cancel") {
+      bodyController.abort(new Error(`Task ${view.taskId} was cancelled.`));
+      if (bodyReader === undefined) executorSettled = true;
+    }
+    if (!isTerminalTaskStatus(view.status)) await flushUpdates();
+    if (
+      pendingInputRequest !== undefined &&
+      dispatchAcknowledged &&
+      view.status === "input_required"
+    ) {
+      await wakeWorkflowTaskInputRequestParentStep({
+        request: pendingInputRequest,
+        taskId: view.taskId,
+        token: input.parentContinuationToken,
+      });
+      pendingInputRequest = undefined;
+    } else if (
+      !dispatchRejected &&
+      dispatchAcknowledged &&
+      (command.kind !== "cancel" || executorSettled) &&
+      ((!isTerminalTaskStatus(previous.status) && isTerminalTaskStatus(view.status)) ||
+        (!isReadyTaskStatus(previous.status) &&
+          isReadyTaskStatus(view.status) &&
+          pendingInputRequest === undefined))
+    ) {
+      await wakeTaskParentStep({ token: input.parentContinuationToken, view });
+    }
+    if (view.status !== "input_required") pendingInputRequest = undefined;
+  }
+
+  async function flushUpdates(includeTerminal = false): Promise<void> {
+    if (!dispatchAcknowledged || (isTerminalTaskStatus(view.status) && !includeTerminal)) return;
+    for (const update of pendingUpdates) {
+      await wakeTaskUpdateParentStep({ token: input.parentContinuationToken, update, view });
+    }
+    pendingUpdates = [];
+  }
+
+  async function transitionTask(command: TaskCommand): Promise<boolean> {
+    const result = applyTaskTransition(view, command);
+    if (result.action !== "accepted") return false;
+    view = result.view;
+    await appendTaskViewStep({ activityObserver: input.activityObserver, view });
+    return true;
+  }
+
+  // Owner traffic must wait until the parent has acknowledged task dispatch.
+  async function handleOwnerRequest(message: WorkflowToolRunRequestMessage): Promise<void> {
+    if (!dispatchAcknowledged) {
+      pendingTraffic.ownerRequests.push(message);
+      return;
+    }
+    const { request, replyTo } = message;
+    if (
+      request.kind === "authorization-request" &&
+      request.event.childSessionId === message.from.runId
+    ) {
+      await handleStepAuthorization(request, replyTo);
+      return;
+    }
+    if (dispatchRejected || isTerminalTaskStatus(view.status)) {
+      return;
+    }
+    if (request.kind === "authorization-request") {
+      await wakeTaskAuthorizationParentStep({
+        request,
+        taskId: view.taskId,
+        token: input.parentContinuationToken,
+      });
+      return;
+    }
+    await wakeTaskAgentRequestParentStep({
+      request: message,
+      taskId: view.taskId,
+      token: input.parentContinuationToken,
+    });
+  }
+
+  async function handleStepAuthorization(
+    request: WorkflowToolAuthorizationRequest,
+    replyTo: string,
+  ): Promise<void> {
+    const event = request.event.event;
+    const closesDisplayedPrompt = event.type === "authorization.completed";
+    const canForward =
+      !dispatchRejected && (!isTerminalTaskStatus(view.status) || closesDisplayedPrompt);
+
+    if (canForward) {
+      const requestId = "attemptId" in event.data ? event.data.attemptId : undefined;
+      if (requestId !== undefined && event.type === "authorization.required") {
+        const existingRequests = view.status === "input_required" ? view.inputRequests : [];
+        await transitionTask({
+          kind: "require-input",
+          inputRequests: [
+            ...existingRequests,
+            { kind: "authorization", requestId, name: event.data.name },
+          ],
+        });
+      } else if (requestId !== undefined) {
+        await transitionTask({ kind: "answered", requestIds: [requestId] });
+      }
+
+      await wakeTaskAuthorizationParentStep({
+        request,
+        taskId: view.taskId,
+        token: input.parentContinuationToken,
+      });
+    }
+
+    // Discarded events are acknowledged too; persistence and delivery failures are not.
+    await resumeHookStep(replyTo, null, { ifPresent: true });
+  }
+
+  async function flushPendingTraffic(): Promise<void> {
+    if (!dispatchRejected) {
+      for (const message of pendingTraffic.messages) {
+        await wakeTaskMessageParentStep({
+          message,
+          taskId: view.taskId,
+          token: input.parentContinuationToken,
+        });
+      }
+    }
+    for (const request of pendingTraffic.ownerRequests) {
+      await handleOwnerRequest(request);
+    }
+    pendingTraffic.messages.length = 0;
+    pendingTraffic.ownerRequests.length = 0;
   }
 }
 
-/**
- * Forwards one human answer to the blocked child and reports which
- * requests it cleared.
- *
- * Delivery is attempted only for requests the run still lists as
- * outstanding, and the resulting command names exactly those ids. That
- * ordering is the point: answers to a superseded batch never reach the
- * child, and a child whose hook is already gone leaves the task blocked
- * instead of moving to `working` with nothing listening.
- */
+async function* awaitBodyResult(
+  result: Promise<WorkflowBodyResult>,
+): AsyncGenerator<WorkflowBodyResult> {
+  yield await result;
+}
+
 async function resolveAnsweredCommand(
   view: Extract<TaskView, { status: "input_required" }>,
   answer: TaskInboundAnswerInput,
+  answerHook: AnswerHookRoute | undefined,
 ): Promise<TaskCommand | undefined> {
   if (answer.taskId !== view.taskId) return undefined;
-
   const outstanding = new Set(
     view.inputRequests.flatMap((request) => {
       const requestId = readTaskInputRequestId(request);
@@ -247,9 +427,9 @@ async function resolveAnsweredCommand(
   );
   const requestIds = answer.inputResponses
     .map((response) => response.requestId)
-    .filter((requestId) => outstanding.has(requestId));
+    .filter((id) => outstanding.has(id));
   if (requestIds.length === 0) return undefined;
-
-  const delivery = await deliverTaskInputResponsesStep({ answer, requestIds });
-  return delivery === "delivered" ? { kind: "answered", requestIds } : undefined;
+  return (await deliverTaskInputResponsesStep({ answer, answerHook, requestIds })) === "delivered"
+    ? { kind: "answered", requestIds }
+    : undefined;
 }

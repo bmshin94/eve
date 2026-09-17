@@ -29,6 +29,12 @@ export interface McpClientConnectionDefinition {
    */
   readonly url: string;
   /**
+   * Whether to discover the server's protocol before initialization.
+   * Defaults to enabled. Set to false for servers that require the older
+   * initialize handshake; that handshake still negotiates a supported version.
+   */
+  readonly protocolVersionDiscovery?: boolean;
+  /**
    * Human-readable summary of the connection and its tools.
    *
    * The system prompt layer uses it to describe the connection to
@@ -42,7 +48,7 @@ export interface McpClientConnectionDefinition {
    *
    * - `getToken`-only: covers static API keys, pre-provisioned
    *   JWTs, and out-of-band OAuth. Defaults to
-   *   `principalType: "app"` when omitted.
+   *   `credentialOwner: "app"` when omitted.
    * - Three-method form: provide `startAuthorization` and
    *   `completeAuthorization` together to opt into
    *   interactive OAuth authorization.
@@ -52,6 +58,14 @@ export interface McpClientConnectionDefinition {
    * Optional when `headers` is provided for non-Bearer auth schemes.
    */
   auth?: ConnectionAuthDefinition;
+  /**
+   * Stable, non-secret identity for the resolved connection instance.
+   *
+   * Authenticated dynamic connections must set this to an account or tenant
+   * identifier that changes whenever the endpoint or auth provider changes.
+   * eve hashes the value before storing it in durable authorization state.
+   */
+  readonly instanceKey?: string;
   /**
    * Optional per-connection approval gate for connection tool calls.
    *

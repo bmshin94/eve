@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
-import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
+import { readClientContext } from "#internal/client-context.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { type AuthFn, none } from "#public/channels/auth.js";
@@ -49,7 +49,14 @@ const OVERRIDE_AUTH: SessionAuthContext = {
 
 type MockSendOptions = Pick<
   RunInput,
-  "auth" | "callback" | "capabilities" | "continuationToken" | "initiatorAuth" | "mode" | "title"
+  | "auth"
+  | "callback"
+  | "capabilities"
+  | "continuationToken"
+  | "activityObserver"
+  | "initiatorAuth"
+  | "mode"
+  | "title"
 >;
 
 function createJsonMessageRequest(body: unknown): Request {
@@ -118,7 +125,9 @@ function createEveCreateHandler(
   const mockSend = vi.fn().mockResolvedValue(createMockSession());
   const createSession = vi.fn(async (runInput: RunInput) => {
     const payload =
-      runInput.input.context === undefined && runInput.input.outputSchema === undefined
+      runInput.input.context === undefined &&
+      readClientContext(runInput.input) === undefined &&
+      runInput.input.outputSchema === undefined
         ? runInput.input.message
         : runInput.input;
     await mockSend(payload, {
@@ -126,6 +135,7 @@ function createEveCreateHandler(
       callback: runInput.callback,
       capabilities: runInput.capabilities,
       continuationToken: runInput.continuationToken,
+      activityObserver: runInput.activityObserver,
       initiatorAuth: runInput.initiatorAuth,
       mode: runInput.mode,
       title: runInput.title,
@@ -644,7 +654,7 @@ describe("eveChannel — stream cursor", () => {
 });
 
 describe("eveChannel — onMessage", () => {
-  it("runs after auth on create requests and appends returned context", async () => {
+  it("runs after auth on create requests and keeps returned context durable", async () => {
     const onMessage = vi.fn((ctx, message) => {
       expect(ctx.eve.caller).toEqual(ACCEPTED_AUTH);
       expect(defaultEveAuth(ctx)).toEqual(ACCEPTED_AUTH);
@@ -673,10 +683,11 @@ describe("eveChannel — onMessage", () => {
     expect(onMessage).toHaveBeenCalledTimes(1);
     expect(handler.send).toHaveBeenCalledTimes(1);
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
-    expect(payload).toEqual({
+    expect(payload).toMatchObject({
       message: "What word is selected?",
-      context: ["Client context:\nselection: jazz", "Authenticated caller profile: enterprise"],
+      context: ["Authenticated caller profile: enterprise"],
     });
+    expect(readClientContext(payload)).toEqual(["Client context:\nselection: jazz"]);
     const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
     expect(options.auth).toEqual(ACCEPTED_AUTH);
     expect(options.title).toBe("HTTP run");
@@ -696,6 +707,20 @@ describe("eveChannel — onMessage", () => {
     expect(payload).toEqual({ message: "hi", context: ["override context"] });
     const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
     expect(options.auth).toEqual(OVERRIDE_AUTH);
+  });
+
+  it("keeps route authentication separate from onMessage session auth", async () => {
+    const handler = createEveCreateHandler({
+      auth: () => ACCEPTED_AUTH,
+      onMessage: () => ({ auth: null, context: ["anonymous session projection"] }),
+    });
+
+    const response = await handler.fetch(createJsonMessageRequest({ message: "hi" }));
+
+    expect(response.status).toBe(202);
+    const runInput = handler.createSession.mock.calls[0]?.[0] as RunInput;
+    expect(runInput.auth).toBeNull();
+    expect(runInput.audienceAuth).toEqual(ACCEPTED_AUTH);
   });
 
   it("does not run onMessage when auth rejects", async () => {
@@ -908,24 +933,6 @@ describe("eveChannel — create session idempotency", () => {
     expect(handler.send).not.toHaveBeenCalled();
   });
 
-  it("adopts the winner when a concurrent create claims the operation token first", async () => {
-    const handler = createEveCreateHandler({ auth: () => ACCEPTED_AUTH });
-    handler.createSession.mockRejectedValueOnce(
-      new RuntimeSessionOwnershipConflictError({
-        continuationToken: "eve:eve:op:test",
-        ownerSessionId: "child-2",
-        sessionId: "loser",
-      }),
-    );
-
-    const response = await handler.fetch(
-      createJsonMessageRequest({ message: "hi", operationId: "operation-1" }),
-    );
-
-    expect(response.status).toBe(202);
-    await expect(response.json()).resolves.toMatchObject({ ok: true, sessionId: "child-2" });
-  });
-
   it("scopes the operation token to the complete authenticated principal", async () => {
     const tokenFor = async (identity: {
       issuer?: string;
@@ -1082,7 +1089,7 @@ describe("eveChannel — create session (text)", () => {
           callId: "call-1",
           subagentName: "research",
           token: "tok123",
-          url: "https://caller.example.com/eve/agents/support/eve/v1/callback/tok123",
+          url: "https://caller.example.com/eve/support/v1/callback/tok123",
         },
         message: "hi",
         mode: "task",
@@ -1189,10 +1196,8 @@ describe("eveChannel — create session (text)", () => {
     expect(response.status).toBe(202);
     expect(handler.send).toHaveBeenCalledTimes(1);
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
-    expect(payload).toEqual({
-      message: "What word is selected?",
-      context: ['Client context:\n{"selectedWord":"jazz"}'],
-    });
+    expect(payload).toMatchObject({ message: "What word is selected?" });
+    expect(readClientContext(payload)).toEqual(['Client context:\n{"selectedWord":"jazz"}']);
   });
 
   it("forwards outputSchema with a create-session message", async () => {
@@ -1246,7 +1251,7 @@ describe("eveChannel — create session (text)", () => {
     expect(response.status).toBe(202);
     expect(handler.send).toHaveBeenCalledTimes(1);
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
-    expect(payload.context).toEqual([
+    expect(readClientContext(payload)).toEqual([
       "Client context:\nroute: /editor",
       "Client context:\nselection: jazz",
     ]);
@@ -1568,6 +1573,24 @@ describe("eveChannel — uploadPolicy enforcement", () => {
 });
 
 describe("eveChannel — continue session HITL (inputResponses)", () => {
+  it("returns the server-issued delivery id in an accepted message acknowledgement", async () => {
+    const handler = createEveContinueHandler({ auth: none() });
+    handler.send.mockResolvedValue({
+      sessionId: "test-session-id",
+      status: "accepted",
+      deliveryId: "accepted-delivery",
+    });
+    const response = await handler.fetch(createJsonMessageRequest({ message: "follow-up" }));
+    expect(response.status).toBe(202);
+    expect(response.headers.get("x-eve-session-id")).toBe("test-session-id");
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      sessionId: "test-session-id",
+      status: "accepted",
+      deliveryId: "accepted-delivery",
+    });
+  });
+
   it("returns a structured 500 when fixed-session delivery fails", async () => {
     const handler = createEveContinueHandler({ auth: none() });
     handler.send.mockRejectedValue(new Error("backing store outage"));
@@ -1592,10 +1615,10 @@ describe("eveChannel — continue session HITL (inputResponses)", () => {
     );
 
     expect(response.status).toBe(202);
-    expect(handler.send).toHaveBeenCalledWith(
-      "yes please",
-      expect.objectContaining({ context: ["Client context:\napproval modal open"] }),
-    );
+    expect(handler.send).toHaveBeenCalledWith("yes please", expect.any(Object));
+    expect(readClientContext(handler.send.mock.calls[0]?.[1])).toEqual([
+      "Client context:\napproval modal open",
+    ]);
   });
 
   it("forwards outputSchema with a continue-session message", async () => {
