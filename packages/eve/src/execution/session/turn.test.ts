@@ -72,7 +72,6 @@ describe("SessionExecution background task checkpoints", () => {
       });
     vi.mocked(dispatchCoordinationStep).mockResolvedValue({
       results: [],
-      pendingTasks: [],
       sessionState,
     });
 
@@ -220,7 +219,6 @@ describe("SessionExecution background task checkpoints", () => {
     vi.mocked(dispatchCoordinationStep)
       .mockReset()
       .mockResolvedValue({
-        pendingTasks: [],
         results: [actionResult],
         sessionState,
       });
@@ -307,7 +305,6 @@ describe("SessionExecution background task checkpoints", () => {
       sessionState,
     });
     vi.mocked(dispatchCoordinationStep).mockResolvedValue({
-      pendingTasks: [],
       results: [],
       sessionState,
     });

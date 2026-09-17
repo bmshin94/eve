@@ -139,7 +139,6 @@ export class SessionExecution {
         });
         const initialAcceptedAtMs = dispatchResult.results.length === 0 ? undefined : Date.now();
         await cursor.apply(dispatchResult);
-        await acknowledgeDelegatedTasksStep({ tasks: dispatchResult.pendingTasks });
 
         const runtimeResults = await this.waitForRuntimeActionResults({
           initialAcceptedAtMs,
