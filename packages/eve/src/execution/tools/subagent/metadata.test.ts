@@ -9,7 +9,7 @@ import { resolveWorkflowAgentMetadata } from "#execution/tools/subagent/metadata
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 
 describe("resolveWorkflowAgentMetadata", () => {
-  it("includes self-delegation and hidden static subagents", () => {
+  it("includes hidden static subagents without adding self-delegation", () => {
     const ctx = context({
       nodeId: undefined,
       subagentsByName: new Map([
@@ -26,8 +26,7 @@ describe("resolveWorkflowAgentMetadata", () => {
       ]),
     });
 
-    expect(resolveWorkflowAgentMetadata(ctx)).toMatchObject({
-      agent: { description: expect.any(String) },
+    expect(resolveWorkflowAgentMetadata(ctx)).toEqual({
       researcher: { description: "Investigate difficult questions." },
     });
   });

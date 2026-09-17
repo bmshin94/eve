@@ -50,7 +50,7 @@ Each compiled agent node records its selected tools and source-composition decis
 
 ## Workflow metadata
 
-A workflow tool receives `ctx.agents`, a replay-stable snapshot of effective agent descriptions keyed by path-derived name. The snapshot includes model-visible and hidden agents, including active dynamic selections, but no model definitions, credentials, or callbacks. Workflow invocation remains separate:
+A workflow tool receives `ctx.agents`, a replay-stable snapshot of effective declared-subagent descriptions keyed by path-derived name. The snapshot includes model-visible and hidden local, remote, and active dynamic subagents, but not the built-in root-copy `agent` target, model definitions, credentials, or callbacks. Workflow invocation remains separate:
 
 ```ts
 const target = await chooseTarget(task, {
@@ -62,3 +62,5 @@ return ctx.agent(target, { message: task });
 ```
 
 The owner snapshots metadata when it starts the workflow run. Older in-flight workflow payloads default to an empty metadata registry. `ctx.agent()` still validates availability at invocation time, so a dynamic agent that becomes unavailable after the snapshot cannot be invoked through stale metadata.
+
+The provided `autoRouter()` workflow tool sends its input message and the complete `ctx.agents` description map to the default evaluation model (`typesafe-ai/jev`), then invokes the selected path-derived name. It forwards an optional output schema and rejects an empty declared-subagent map before evaluation. Authors use `defineWorkflowTool` directly when routing requires a subset, custom instructions, or a non-default evaluator.

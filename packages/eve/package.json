@@ -127,6 +127,11 @@
       "import": "./dist/src/public/memory/file/vercel.js",
       "default": "./dist/src/public/memory/file/vercel.js"
     },
+    "./tools/auto-router": {
+      "types": "./dist/src/public/tools/auto-router.d.ts",
+      "import": "./dist/src/public/tools/auto-router.js",
+      "default": "./dist/src/public/tools/auto-router.js"
+    },
     "./tools/sleep": {
       "types": "./dist/src/public/tools/sleep.d.ts",
       "import": "./dist/src/public/tools/sleep.js",

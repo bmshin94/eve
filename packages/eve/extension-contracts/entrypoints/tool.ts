@@ -8,6 +8,11 @@ export {
   toolResultFrom,
 } from "../../src/public/tools/index.ts";
 export {
+  autoRouter,
+  type AutoRouterInput,
+  type AutoRouterTool,
+} from "../../src/public/tools/auto-router.ts";
+export {
   defaultWebSearch,
   isWebSearchToolDefinition,
   webSearch,

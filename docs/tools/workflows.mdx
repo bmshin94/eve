@@ -345,47 +345,35 @@ export default defineAgent({
 });
 ```
 
-Define the model-visible router under `agent/tools/`. Put the evaluation in a step so workflow replay records its result instead of making the routing request again:
+Define the model-visible router under `agent/tools/`:
 
 ```ts title="agent/tools/route_task.ts"
-import { evaluate } from "eve/experimental/evaluate";
-import { defineWorkflowTool } from "eve/tools";
-import { z } from "zod";
+import { autoRouter } from "eve/tools/auto-router";
 
-async function chooseTarget(task: string, criteria: Record<"researcher" | "operator", string>) {
-  "use step";
-
-  const result = await evaluate({
-    model: "typesafe-ai/jev",
-    state: { task },
-    questions: {
-      route: {
-        type: "choice",
-        instructions: "Which specialist should handle this task?",
-        criteria,
-      },
-    },
-  });
-
-  return result.answers.route.choice;
-}
-
-export default defineWorkflowTool({
-  description: "Route a task to the appropriate specialist.",
-  inputSchema: z.object({ task: z.string().min(1).max(8000) }),
-  async execute({ task }, ctx) {
-    "use workflow";
-
-    const target = await chooseTarget(task, {
-      researcher: ctx.agents.researcher.description,
-      operator: ctx.agents.operator.description,
-    });
-    return ctx.agent(target, { message: task });
-  },
-});
+export default autoRouter();
 ```
 
-The parent model receives `route_task`, but not `researcher` or `operator`. When it calls `route_task`, the workflow reads each effective subagent description from `ctx.agents` and JEV returns the typed `"researcher" | "operator"` choice. The workflow passes that choice directly to `ctx.agent()`, and the subagent's result becomes the `route_task` tool result.
+The parent model receives `route_task`, but not `researcher` or `operator`. Its input is `{ message: string, outputSchema?: object }`. With two or more available subagents, `autoRouter()` sends the message and every effective description to JEV, then passes the selected path-derived name and message to `ctx.agent()`. It invokes a sole available subagent without evaluation. An optional `outputSchema` is forwarded to the selected agent.
+
+`autoRouter()` uses every declared local, remote, and dynamic subagent available to the workflow. It does not include the built-in root-copy `agent` target. Use an authored `defineWorkflowTool` when the router should consider only a subset or needs different routing instructions. Build custom JEV criteria directly from `ctx.agents`:
+
+```ts
+const result = await evaluate({
+  state: { task },
+  questions: {
+    route: {
+      type: "choice",
+      instructions: "Which specialist should handle this task?",
+      criteria: {
+        researcher: ctx.agents.researcher.description,
+        operator: ctx.agents.operator.description,
+      },
+    },
+  },
+});
+
+return ctx.agent(result.answers.route.choice, { message: task });
+```
 
 `ctx.agents` is a replay-stable metadata snapshot taken when the workflow starts. It includes agents hidden from the parent model with `tool: false` or `disableTool()`, but exposes no model definitions, credentials, or callbacks. Invocation still checks the agent's availability through `ctx.agent()`.
 
