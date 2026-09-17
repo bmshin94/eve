@@ -8,6 +8,7 @@ import {
   OPTIONS,
   POST,
   type Channel,
+  type TaskWakePolicy,
 } from "#public/definitions/channel.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type {
@@ -46,6 +47,8 @@ export interface McpChannelInput {
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
   /** Override the default MCP route path (`/eve/v1/mcp`). */
   readonly route?: string;
+  /** Background task result delivery policy. Defaults to "cohort". */
+  readonly taskWakePolicy?: TaskWakePolicy;
 }
 
 /** Public MCP channel exposing durable agent invocation compatibility tools. */
@@ -82,7 +85,7 @@ export function mcpChannel(input: McpChannelInput): McpChannel {
   if (oauth !== undefined) {
     routes.unshift(...protectedResourceMetadataRoutes(oauth, path));
   }
-  return defineChannel({ routes });
+  return defineChannel({ routes, taskWakePolicy: input.taskWakePolicy });
 }
 
 function protectedResourceMetadataRoutes(options: OAuthResourceOptions, resourcePath: string) {

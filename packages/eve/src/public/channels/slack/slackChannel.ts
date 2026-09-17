@@ -9,7 +9,7 @@ import type {
 import { defaultDeliverResult } from "#channel/adapter.js";
 import type { Session, SessionHandle } from "#channel/session.js";
 import { setChannelActivityRenderers } from "#channel/compiled-channel.js";
-import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy, TaskWakePolicy } from "#channel/types.js";
 import type { CardElement } from "#compiled/chat/index.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
@@ -660,6 +660,8 @@ export interface SlackChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
+  /** Background task result delivery policy. Defaults to "cohort". */
+  readonly taskWakePolicy?: TaskWakePolicy;
 
   /**
    * Inbound upload policy applied to file attachments before they reach
@@ -948,6 +950,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   >({
     kindHint: "slack",
     turnPolicy: config.turnPolicy,
+    taskWakePolicy: config.taskWakePolicy,
     state: {
       channelId: null as string | null,
       threadTs: null as string | null,

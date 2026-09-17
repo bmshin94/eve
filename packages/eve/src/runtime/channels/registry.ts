@@ -40,6 +40,7 @@ const FRAMEWORK_ADAPTERS: readonly ChannelAdapter[] = [
  */
 const ADAPTER_NON_EVENT_FIELDS: ReadonlySet<string> = new Set([
   "kind",
+  "taskWakePolicy",
   "state",
   "deliver",
   "createAdapterContext",
@@ -161,6 +162,8 @@ function requireAdapterKind(
  */
 function carriesAdapterBehavior(adapter: ChannelAdapter): boolean {
   if (getChannelActivityPresentation(adapter) !== undefined) return true;
+
+  if (adapter.taskWakePolicy !== undefined) return true;
 
   if (adapter.deliver !== undefined) {
     return true;

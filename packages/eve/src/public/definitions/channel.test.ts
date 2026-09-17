@@ -1,3 +1,6 @@
+import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import { eveChannel } from "#eve-channel/index.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -35,6 +38,35 @@ function getAdapter(channel: unknown): ChannelAdapter<any> {
 }
 
 describe("defineChannel", () => {
+  it.each(["cohort", "single"] as const)(
+    "retains a policy-only channel across step boundaries: %s",
+    async (taskWakePolicy) => {
+      const channel = defineChannel({ routes: [], taskWakePolicy });
+      const adapter = getAdapter(channel);
+      expect(adapter.kind).not.toBe("http");
+      const ctx = new ContextContainer();
+      const adapterRegistry: CompiledBundle["adapterRegistry"] = {
+        adaptersByKind: new Map([[adapter.kind, adapter]]),
+      };
+      ctx.set(BundleKey, { adapterRegistry } as CompiledBundle);
+      const codec = ChannelKey.codec!;
+      const restored = await codec.deserialize(codec.serialize!(adapter), ctx);
+      expect(restored.taskWakePolicy).toBe(taskWakePolicy);
+      expect(getAdapter(defineChannel({ routes: [] })).taskWakePolicy).toBeUndefined();
+    },
+  );
+
+  it("rejects an unsupported task wake policy", () => {
+    expect(() => defineChannel({ routes: [], taskWakePolicy: "invalid" as never })).toThrow(
+      'taskWakePolicy must be "cohort" or "single".',
+    );
+  });
+
+  it("forwards the eve channel task wake policy to its adapter", () => {
+    const channel = eveChannel({ auth: () => null, taskWakePolicy: "single" });
+    expect(getAdapter(channel).taskWakePolicy).toBe("single");
+  });
+
   it("preserves the configured turn policy", () => {
     const channel = defineChannel({
       routes: [POST("/x", async () => new Response("ok"))],

@@ -56,5 +56,4 @@ export default defineAgent({
   ...base,
   model: mockModel(respond),
   modelContextWindowTokens: base.modelContextWindowTokens ?? 1_000_000,
-  tasks: { wakePolicy: "single" },
 });

@@ -9,7 +9,7 @@ import {
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { ChannelContinuationOps } from "#public/definitions/channel.js";
+import type { ChannelContinuationOps, TaskWakePolicy } from "#public/definitions/channel.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -93,7 +93,6 @@ export interface TelegramChannelContext extends TelegramContext {
 /** Event-handler Telegram context, including continuation routing. */
 export interface TelegramEventContext extends TelegramChannelContext, ChannelContinuationOps {}
 
-/** JSON-serializable Telegram channel state. */
 export interface TelegramChannelState extends TelegramHitlState {
   /** Telegram bot username used for group mention detection, when configured. */
   botUsername?: string | null;
@@ -134,7 +133,6 @@ export type TelegramInboundResult = {
   readonly title?: string;
 } | null;
 
-/** Sync or async {@link TelegramInboundResult}. */
 export type TelegramInboundResultOrPromise = TelegramInboundResult | Promise<TelegramInboundResult>;
 
 type TelegramEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
@@ -191,6 +189,8 @@ export interface TelegramChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
+  /** Background task result delivery policy. Defaults to "cohort". */
+  readonly taskWakePolicy?: TaskWakePolicy;
   /** Inbound upload policy for Telegram photos and documents. */
   readonly uploadPolicy?: UploadPolicyInput;
 }
@@ -229,7 +229,6 @@ export interface TelegramHandle {
   }): Promise<TelegramApiResponse>;
 }
 
-/** Concrete return type of {@link telegramChannel}. */
 export interface TelegramChannel extends Channel<
   TelegramChannelState,
   TelegramReceiveTarget,
@@ -250,6 +249,7 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
   >({
     kindHint: "telegram",
     turnPolicy: config.turnPolicy,
+    taskWakePolicy: config.taskWakePolicy,
     state: initialTelegramState(config.botUsername),
     ...telegramInstrumentation,
     fetchFile: createTelegramFetchFile({

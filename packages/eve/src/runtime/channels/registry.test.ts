@@ -109,6 +109,13 @@ describe("createRuntimeAdapterRegistry", () => {
   });
 
   describe("route-declared adapters sharing a framework kind", () => {
+    it("rejects a policy on the reserved HTTP adapter instead of discarding it", () => {
+      expect(() =>
+        createRuntimeAdapterRegistry({
+          channels: [makeChannelDefinition({ kind: "http", taskWakePolicy: "single" })],
+        }),
+      ).toThrow(RuntimeRegistryError);
+    });
     it("silently merges a bare pass-through that re-declares a framework kind", () => {
       const registry = createRuntimeAdapterRegistry({
         channels: [makeChannelDefinition({ kind: "http" })],

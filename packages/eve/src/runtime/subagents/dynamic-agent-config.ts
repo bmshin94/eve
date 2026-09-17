@@ -6,7 +6,6 @@ import type { RuntimeModelCatalog } from "#runtime/agent/model-catalog.js";
 import {
   isDynamicModelDefinition,
   type AgentLimitsDefinition,
-  type AgentTasksDefinition,
   type AgentReasoningDefinition,
 } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
@@ -19,7 +18,6 @@ export interface DynamicSubagentAgentConfig {
   };
   readonly description: string;
   readonly limits?: AgentLimitsDefinition;
-  readonly tasks?: AgentTasksDefinition;
   readonly model: DynamicSubagentModelReference;
   readonly outputSchema?: JsonObject;
   readonly reasoning?: AgentReasoningDefinition;
@@ -56,7 +54,6 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
     compaction?: DynamicSubagentAgentConfig["compaction"];
     description: string;
     limits?: AgentLimitsDefinition;
-    tasks?: AgentTasksDefinition;
     model: DynamicSubagentModelReference;
     outputSchema?: JsonObject;
     reasoning?: AgentReasoningDefinition;
@@ -93,9 +90,6 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
       compaction.thresholdPercent = definition.compaction.thresholdPercent;
     }
     config.compaction = compaction;
-  }
-  if (definition.tasks !== undefined) {
-    config.tasks = definition.tasks;
   }
   if (definition.limits !== undefined) {
     config.limits = definition.limits;

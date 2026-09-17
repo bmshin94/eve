@@ -76,6 +76,35 @@ When eve doesn't ship a channel for your surface, build one with `defineChannel`
 
 A cross-channel `send(...)` supplies input to the agent and invokes the model on the destination channel. eve does not currently provide a direct cross-channel provider-message queue. To post without starting a turn, use the provider API. See [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications) when delivery also needs application-managed retries and deduplication.
 
+## Background task results
+
+Set `taskWakePolicy` on the channel to choose when successful background task
+results wake the session:
+
+- `"cohort"` (default): wait for overlapping tasks to settle, then deliver their successful results together.
+- `"single"`: deliver ready results without waiting for unfinished siblings. Already-queued results from the same cohort may share a turn.
+
+```ts title="agent/channels/slack.ts"
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  taskWakePolicy: "single",
+});
+```
+
+The option is available on `defineChannel`, `eveChannel`, and the platform channel
+wrappers. Each channel chooses its own policy for sessions it starts; the same
+agent can use different policies on Slack and HTTP. The setting covers results
+from background tools and subagents in those sessions. It does not configure the
+subagents' own sessions.
+
+Failures, cancellations, input requests, and explicit task messages remain
+eligible for delivery under either policy. User messages follow `turnPolicy`.
+See [Completion batching](../subagents#completion-batching) for cohort membership
+and result ordering.
+
 ## Relationship to the Chat SDK
 
 eve uses the [Chat SDK's card-builder components](https://chat-sdk.dev/docs/api/cards) (Cards, Buttons, Actions, etc.) for composing rich Slack messages. When you build a card with the [Slack channel](./slack), the underlying primitives come from the Chat SDK and get converted to Slack Block Kit at post time.

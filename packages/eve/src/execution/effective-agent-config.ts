@@ -2,12 +2,11 @@ import type { ContextReader } from "#context/key.js";
 import { DynamicSubagentAgentConfigKey } from "#context/keys.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
-import type { AgentLimitsDefinition, AgentTasksDefinition } from "#shared/agent-definition.js";
+import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 
 export interface EffectiveAgentRuntime {
   readonly limits?: AgentLimitsDefinition;
-  readonly tasks?: AgentTasksDefinition;
   readonly thresholdPercent?: number;
   readonly turnAgent: RuntimeTurnAgent;
 }
@@ -29,7 +28,6 @@ export function resolveEffectiveAgentRuntimeFromConfig(
     }
     return {
       limits: bundle.resolvedAgent.config?.limits,
-      tasks: bundle.resolvedAgent.config?.tasks,
       thresholdPercent: bundle.resolvedAgent.config?.compaction?.thresholdPercent,
       turnAgent: bundle.turnAgent,
     };
@@ -44,7 +42,6 @@ export function resolveEffectiveAgentRuntimeFromConfig(
   } = bundle.turnAgent;
   return {
     limits: config.limits,
-    tasks: config.tasks,
     thresholdPercent: config.compaction?.thresholdPercent,
     turnAgent: {
       ...turnAgent,

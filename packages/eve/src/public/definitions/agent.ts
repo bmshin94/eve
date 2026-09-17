@@ -20,7 +20,6 @@ export type {
   PublicAgentDynamicModelResult as AgentDynamicModelResult,
   AgentExperimentalDefinition,
   AgentLimitsDefinition,
-  AgentTasksDefinition,
   PublicAgentModelSelectionDefinition as AgentModelSelectionDefinition,
   AgentWorkflowDefinition,
   AgentWorkflowRetentionDefinition,

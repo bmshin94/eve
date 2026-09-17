@@ -90,7 +90,6 @@ export async function compileAgentConfig(
     reasoning?: CompiledAgentDefinition["reasoning"];
     source: ModuleSourceRef;
     limits?: CompiledAgentDefinition["limits"];
-    tasks?: CompiledAgentDefinition["tasks"];
   } = {
     compaction,
     name: manifest.agentId,
@@ -136,10 +135,6 @@ export async function compileAgentConfig(
 
   if (definition.reasoning !== undefined) {
     compiledConfig.reasoning = definition.reasoning;
-  }
-
-  if (definition.tasks !== undefined) {
-    compiledConfig.tasks = { ...definition.tasks };
   }
 
   if (definition.limits !== undefined) {

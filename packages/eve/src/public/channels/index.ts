@@ -40,6 +40,7 @@ export {
   type SessionRespondOptions,
   type SessionSendOptions,
   type TurnPolicy,
+  type TaskWakePolicy,
   type RouteDefinition,
   type RouteHandlerArgs,
   type HttpRouteDefinition,

@@ -2,7 +2,7 @@ import { defaultDeliverResult } from "#channel/adapter.js";
 import type { TeamsInstrumentationMetadata } from "#public/channels/teams/index.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
-import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy, TaskWakePolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
@@ -212,6 +212,8 @@ export interface TeamsChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
+  /** Background task result delivery policy. Defaults to "cohort". */
+  readonly taskWakePolicy?: TaskWakePolicy;
 
   /** Inbound message hook. Defaults to user-scoped auth and mention-gated dispatch outside personal chats. */
   onMessage?(
@@ -301,6 +303,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
   >({
     kindHint: "teams",
     turnPolicy: config.turnPolicy,
+    taskWakePolicy: config.taskWakePolicy,
     state: initialTeamsState(),
     fetchFile: createTeamsFetchFile(filesPolicy, {
       ...config.api,

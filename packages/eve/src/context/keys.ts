@@ -16,6 +16,7 @@ import type {
   SessionParent,
   SessionTraceContext,
   SessionTurn,
+  TaskWakePolicy,
 } from "#channel/types.js";
 import { ContextKey } from "#context/key.js";
 import {
@@ -100,8 +101,8 @@ export const SessionTitleKey = new ContextKey<string>("eve.sessionTitle");
 export const ChannelDeliveryKey = new ContextKey<ChannelDeliveryMetadata>("eve.channelDelivery");
 /** Accepted messages whose response owns the current turn's durable stream events. */
 export const TurnDeliveryIdsKey = new ContextKey<readonly string[]>("eve.turnDeliveryIds");
-/** Wake policy resolved by the last committed step, also read by the workflow inbox. */
-export const TaskWakePolicyKey = new ContextKey<"cohort" | "single">("eve.taskWakePolicy");
+/** Channel wake policy resolved by the last committed step, also read by the workflow inbox. */
+export const TaskWakePolicyKey = new ContextKey<TaskWakePolicy>("eve.taskWakePolicy");
 /** Task-reporting phase for the active root turn. */
 export const TurnTaskDeliveryKey = new ContextKey<"none" | "initiating" | "pending" | "settled">(
   "eve.turnTaskDelivery",

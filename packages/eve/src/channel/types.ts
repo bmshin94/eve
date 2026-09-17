@@ -195,6 +195,9 @@ export interface DeliverPayload {
   readonly [key: string]: unknown;
 }
 
+/** Controls when successful background task results become eligible for delivery. */
+export type TaskWakePolicy = "cohort" | "single";
+
 /** Controls how a channel message interacts with an active turn. */
 export type TurnPolicy = "steer" | "queue";
 

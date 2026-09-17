@@ -1,5 +1,4 @@
-import type { AgentTasksDefinition } from "#shared/agent-definition.js";
-import type { DeliverHookPayload } from "#channel/types.js";
+import type { TaskWakePolicy, DeliverHookPayload } from "#channel/types.js";
 import { markFrameworkStepInput } from "#harness/messages.js";
 import type { SessionStateMap, StepInput } from "#harness/types.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
@@ -40,7 +39,7 @@ export function resolveTaskDeliveryContext(input: {
   readonly state: SessionStateMap | undefined;
   readonly taskDeliveryId: string;
   readonly taskDeliveryIds?: readonly string[];
-  readonly wakePolicy?: AgentTasksDefinition["wakePolicy"];
+  readonly wakePolicy?: TaskWakePolicy;
 }):
   | {
       readonly context: string;

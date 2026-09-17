@@ -1,7 +1,7 @@
 import type { DiscordInstrumentationMetadata } from "#public/channels/discord/index.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
-import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy, TaskWakePolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -70,7 +70,6 @@ export type DiscordChannelContext = DiscordContext & { state: DiscordChannelStat
 /** Event-handler Discord context, including continuation routing. */
 export interface DiscordEventContext extends DiscordChannelContext, ChannelContinuationOps {}
 
-/** JSON-serializable Discord channel state. */
 export interface DiscordChannelState {
   audience?: ChannelAudience;
   /** Discord channel id. */
@@ -158,6 +157,8 @@ export interface DiscordChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
+  /** Background task result delivery policy. Defaults to "cohort". */
+  readonly taskWakePolicy?: TaskWakePolicy;
 
   /** Inbound command hook. Defaults to user-scoped Discord auth and dispatch. Return `{ auth }` to dispatch, or `null` to acknowledge without running the agent. */
   onCommand?(
@@ -207,7 +208,6 @@ export interface DiscordRequestOptions {
   readonly method?: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
 }
 
-/** Concrete return type of {@link discordChannel}. */
 export interface DiscordChannel extends Channel<
   DiscordChannelState,
   DiscordReceiveTarget,
@@ -226,6 +226,7 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
   >({
     kindHint: "discord",
     turnPolicy: config.turnPolicy,
+    taskWakePolicy: config.taskWakePolicy,
     state: initialDiscordState(),
     metadata: discordInstrumentationMetadata,
     audience: ({ state }) => state.audience ?? "unknown",

@@ -62,7 +62,6 @@ export function normalizeAgentDefinition(
       "modelOptions",
       "outputSchema",
       "reasoning",
-      "tasks",
     ],
     message,
   );
@@ -124,19 +123,6 @@ export function normalizeAgentDefinition(
 
   if (record.limits !== undefined) {
     definition.limits = normalizeAgentLimitsDefinition(record.limits, message);
-  }
-
-  if (record.tasks !== undefined) {
-    const tasks = expectObjectRecord(record.tasks, message);
-    expectOnlyKnownKeys(tasks, ["wakePolicy"], message);
-    if (
-      tasks.wakePolicy !== undefined &&
-      tasks.wakePolicy !== "cohort" &&
-      tasks.wakePolicy !== "single"
-    ) {
-      throw new Error(`${message} "tasks.wakePolicy" must be "cohort" or "single".`);
-    }
-    definition.tasks = { wakePolicy: tasks.wakePolicy };
   }
 
   return definition as Readonly<NormalizedAgentDefinition>;

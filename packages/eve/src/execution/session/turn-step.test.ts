@@ -2541,9 +2541,10 @@ describe("turnStep", () => {
       const bundle = createStubBundle();
       vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
         ...bundle,
-        resolvedAgent: {
-          ...bundle.resolvedAgent,
-          config: { ...bundle.resolvedAgent.config, tasks: { wakePolicy } },
+        adapterRegistry: {
+          adaptersByKind: new Map([
+            [threadContextAdapter.kind, { ...threadContextAdapter, taskWakePolicy: wakePolicy }],
+          ]),
         },
       } as typeof bundle);
       installSessionStoreMocks([createStubSession()]);

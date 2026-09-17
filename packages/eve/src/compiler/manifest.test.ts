@@ -17,7 +17,6 @@ describe("compiled agent manifest v48", () => {
       agent: {
         experimental: { workflow: { modelCallsPerStep: 4, retention: 0 } },
         limits: { maxTokenCostUsdPerSession: 1.5 },
-        tasks: { wakePolicy: "single" },
         model: "openai/gpt-5.4",
       },
       model: "openai/gpt-5.4",
@@ -26,7 +25,6 @@ describe("compiled agent manifest v48", () => {
 
     const parsed = compiledAgentManifestSchema.parse(JSON.parse(JSON.stringify(manifest)));
     expect(parsed.version).toBe(COMPILED_AGENT_MANIFEST_VERSION);
-    expect(parsed.config.tasks?.wakePolicy).toBe("single");
     expect(parsed.config.experimental?.workflow?.modelCallsPerStep).toBe(4);
     // `0` is falsy: a truthiness-based copy anywhere on the manifest path drops it.
     expect(parsed.config.experimental?.workflow?.retention).toBe(0);

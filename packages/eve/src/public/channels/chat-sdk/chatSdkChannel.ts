@@ -8,7 +8,7 @@ import {
 } from "#channel/channel-operations.js";
 import { normalizeSendInput } from "#channel/send-input.js";
 import type { SendPayload } from "#channel/routes.js";
-import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy, TaskWakePolicy } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
@@ -181,6 +181,8 @@ export interface ChatSdkChannelConfig<
   readonly routes?: Partial<Record<Extract<keyof TAdapters, string>, string>>;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
+  /** Background task result delivery policy. Defaults to "cohort". */
+  readonly taskWakePolicy?: TaskWakePolicy;
   /** Extra Chat SDK webhook options. eve owns `waitUntil`. */
   readonly webhook?: Omit<WebhookOptions, "waitUntil">;
   /** Optional eve event handlers. Supplied handlers replace built-in defaults. */
@@ -293,6 +295,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
   >({
     kindHint: "chat-sdk",
     turnPolicy: config.turnPolicy,
+    taskWakePolicy: config.taskWakePolicy,
     state: initialState(),
     ...chatSdkInstrumentation,
     context(state) {

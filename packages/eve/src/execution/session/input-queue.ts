@@ -1,7 +1,6 @@
-import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
+import type { TaskWakePolicy, DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { jsonValuesEqual } from "#shared/json.js";
-import type { AgentTasksDefinition } from "#shared/agent-definition.js";
 import type { getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
 
 export type SessionControl = "clear" | "compact" | "expired" | "reset";
@@ -168,7 +167,7 @@ export class SessionInputQueue {
     cohorts: TaskCohorts,
     options?: {
       readonly deferDeliveries?: boolean;
-      readonly wakePolicy?: AgentTasksDefinition["wakePolicy"];
+      readonly wakePolicy?: TaskWakePolicy;
       /**
        * Attempt ids of the open authorization challenge. Callbacks for other
        * attempts are stale and dropped; once every expected attempt has
@@ -199,7 +198,7 @@ export class SessionInputQueue {
     const index = this.nextActionableIndex(
       cohorts,
       options?.deferDeliveries === true,
-      options?.wakePolicy,
+      options?.wakePolicy ?? "cohort",
     );
     if (index < 0) return undefined;
     return this.takeSelectionAt(index, cohorts, options?.freshSequence);
@@ -208,7 +207,7 @@ export class SessionInputQueue {
   private nextActionableIndex(
     cohorts: TaskCohorts,
     deferDeliveries: boolean,
-    wakePolicy: AgentTasksDefinition["wakePolicy"],
+    wakePolicy: TaskWakePolicy,
   ): number {
     const deliveries = this.entries.filter(
       (entry): entry is QueuedDelivery => entry.kind === "delivery",

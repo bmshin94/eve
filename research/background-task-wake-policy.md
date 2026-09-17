@@ -6,23 +6,26 @@ last_updated: "2026-09-17"
 
 # Configurable background task wakes
 
-The parent agent chooses whether successful task results wait for unfinished
+The channel chooses whether successful task results wait for unfinished
 siblings; task execution and terminality remain independent of that choice.
 
 ## Authoring
 
 ```ts
-import { defineAgent } from "eve";
+import { eveChannel } from "eve/channels/eve";
+import { localDev } from "eve/channels/auth";
 
-export default defineAgent({
-  model: "anthropic/claude-opus-4.8",
-  tasks: { wakePolicy: "single" },
+export default eveChannel({
+  auth: localDev(),
+  taskWakePolicy: "single",
 });
 ```
 
-`tasks.wakePolicy` accepts `"cohort"` (default) or `"single"`. It applies to all
-background tasks owned by this agent. Declared children configure their own
-policy for tasks they start; dynamic child definitions carry the same setting.
+`taskWakePolicy` accepts `"cohort"` (default) or `"single"` on `defineChannel`
+and its built-in wrappers. It controls background results for sessions started
+on that channel. Agent definitions do not carry this setting: the same agent can
+have different wake policies on different channels. Child sessions use their own
+channel policy.
 
 ## Observable behavior
 
@@ -40,8 +43,9 @@ ordering and remain serviceable with unfinished background work.
 
 ## Runtime boundaries
 
-The agent definition is validated and compiled with the wake policy. Each model
-step records its resolved policy in durable context so the workflow input queue
+The channel definition validates the wake policy and carries it on its adapter.
+Policy-only channels keep a distinct adapter identity for rehydration. Each model
+step records its channel policy in durable context so the workflow input queue
 can decide eligibility without running the parent model. The queue preserves all
 notification identities when it combines ready results; routing may strip task
 payloads after caching their terminal views, so reporting uses those identities

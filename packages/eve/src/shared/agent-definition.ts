@@ -142,18 +142,9 @@ export interface PublicAgentCompactionDefinition {
   readonly thresholdPercent?: number;
 }
 
-/** Controls delivery from background tasks owned by this agent. */
-export interface AgentTasksDefinition {
-  /**
-   * When successful background task results may start a parent turn.
-   * `cohort` waits for overlapping tasks to settle. `single` delivers ready
-   * results without waiting for unfinished siblings; buffered results may share a turn.
-   * @default "cohort"
-   */
-  readonly wakePolicy?: "cohort" | "single";
-}
-
-/** Configures framework-owned runtime limits for this agent's runs. */
+/**
+ * Configures framework-owned runtime limits for this agent's runs.
+ */
 export interface AgentLimitsDefinition {
   /**
    * Session lifetime from creation or the latest ownership handoff, in milliseconds.
@@ -341,7 +332,6 @@ export type InternalAgentDefinition = {
   reasoning?: AgentReasoningDefinition;
   source?: ModuleSourceRef;
   limits?: AgentLimitsDefinition;
-  tasks?: AgentTasksDefinition;
 };
 
 /**
@@ -380,8 +370,6 @@ type PublicAgentDefinitionBase = {
    * Framework-owned runtime limits for this agent's runs.
    */
   readonly limits?: AgentLimitsDefinition;
-  /** Controls when this agent receives results from its background tasks. */
-  readonly tasks?: AgentTasksDefinition;
   /**
    * Optional structured return type used when this agent runs in task mode
    * (for example as a subagent, schedule, or remote job). Interactive

@@ -611,10 +611,6 @@ const compiledAgentConfigBaseFields = {
     .optional(),
   source: moduleSourceRefSchema,
   limits: compiledAgentLimitsDefinitionSchema.optional(),
-  tasks: z
-    .object({ wakePolicy: z.enum(["cohort", "single"]).optional() })
-    .strict()
-    .optional(),
 };
 
 const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z.union([
@@ -1217,7 +1213,6 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
     name: config.name,
     outputSchema: config.outputSchema,
     reasoning: config.reasoning,
-    tasks: config.tasks === undefined ? undefined : { ...config.tasks },
     limits:
       config.limits === undefined
         ? undefined
