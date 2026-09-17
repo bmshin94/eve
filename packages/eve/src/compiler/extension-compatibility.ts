@@ -22,12 +22,12 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 48,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 45, 46, 48],
+    current: 49,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 45, 46, 47, 49],
     dropped: {
       28: "background execution was removed from defineTool; use defineWorkflowTool for durable background work",
       44: "background execution and TaskExec were removed from defineTool; use defineWorkflowTool for durable background work",
-      47: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
+      48: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
       15: "TaskExec replaces stageEffect with send",
       16: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
@@ -54,17 +54,17 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   dynamicTool: {
-    current: 46,
+    current: 47,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 31, 32, 33, 42, 43,
-      44, 46,
+      44, 45, 47,
     ],
     dropped: {
       28: "background dynamic tools were removed; use a static defineWorkflowTool for durable background work",
       29: "background dynamic tools were removed; use a static defineWorkflowTool for durable background work",
       30: "background dynamic tools were removed; use a static defineWorkflowTool for durable background work",
       41: "background dynamic tools were removed; use a static defineWorkflowTool for durable background work",
-      45: "Background dynamic tools were removed; use a static defineWorkflowTool for durable background work.",
+      46: "Background dynamic tools were removed; use a static defineWorkflowTool for durable background work.",
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       23: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
       24: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
@@ -101,8 +101,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   subagent: {
-    current: 16,
-    supported: [3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+    current: 17,
+    supported: [3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
       2: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
