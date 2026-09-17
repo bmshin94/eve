@@ -1,3 +1,4 @@
+import type { TaskWorkflowInvocation } from "#harness/workflow-invocations.js";
 import type { ContextContainer } from "#context/container.js";
 import { loadContext } from "#context/container.js";
 import { ActivityObserverKey } from "#context/keys.js";
@@ -23,7 +24,6 @@ import {
   createTaskAgentDispatchContext,
   prepareBackgroundTask,
   rejectDelegatedDispatch,
-  type BackgroundTask,
 } from "#execution/tasks/parent/delegate.js";
 import { parseWorkflowToolInput } from "#execution/tools/workflow/background.js";
 import { startTaskRun, waitForTaskCommandOwner } from "#execution/tasks/parent/run-parent.js";
@@ -52,7 +52,7 @@ interface BackgroundToolExecutionRecord {
     readonly operationId: string;
   };
   settled: boolean;
-  task?: BackgroundTask;
+  task?: TaskWorkflowInvocation;
 }
 
 interface BackgroundToolStepResult {
@@ -296,7 +296,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     | {
         readonly kind: "started";
         readonly receipt?: { readonly agentId: string };
-        readonly task: BackgroundTask;
+        readonly task: TaskWorkflowInvocation;
       }
     | {
         readonly kind: "steered";
