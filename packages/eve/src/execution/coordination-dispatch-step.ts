@@ -72,6 +72,10 @@ export async function dispatchCoordinationStep(
       nextSession === session
         ? prepared.sessionState
         : createDurableSessionState({ session: nextSession }),
-    pendingTasks,
+    pendingTasks: pendingTasks.map((entry) => ({
+      taskId: entry.task.taskId,
+      taskRunId: entry.address.runId,
+      taskInboxToken: entry.address.hookToken,
+    })),
   };
 }
