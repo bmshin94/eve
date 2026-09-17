@@ -112,134 +112,118 @@ const TEST_CONFIG = {
 };
 
 describe("eve eval environment loading", () => {
-  it.each([
-    "local",
-    "remote",
-    "startup failure",
-    "eval failure",
-    "close failure",
-    "teardown failure",
-  ])("keeps setup resources and environment overrides through %s", async (mode) => {
-    const fixtureRoot = await realpath(await createEnvironmentFixture());
-    const previousCwd = process.cwd();
-    const logger = { error: vi.fn(), log: vi.fn() };
-    const exit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
-    const lifecycle: string[] = [];
-    const expectOverrides = () => {
-      expect(process.env.EVE_DEV_SHARED).toBe("from-setup");
-      expect(process.env.EVE_DEV_SHELL_ONLY).toBeUndefined();
-      expect(process.env.EVE_DEV_DEFAULT_ONLY).toBeUndefined();
-      expect(process.env.EVE_EVAL_SETUP_NEW).toBe("new");
-    };
-    process.env.EVE_DEV_SHELL_ONLY = "from-shell";
-    mockedEvalDependencies.discoverAndImportEvals.mockResolvedValue([
-      makeEvaluation("first"),
-      makeEvaluation("second"),
-    ]);
-    mockedEvalDependencies.discoverEvalConfig.mockResolvedValue({
-      ...TEST_CONFIG,
-      async setup() {
-        expect(process.env.EVE_DEV_SHARED).toBe("from-local");
-        lifecycle.push("setup");
-        return {
-          env: {
-            EVE_DEV_SHARED: "from-setup",
-            EVE_DEV_SHELL_ONLY: undefined,
-            EVE_DEV_DEFAULT_ONLY: undefined,
-            EVE_EVAL_SETUP_NEW: "new",
-          },
-          async teardown() {
-            expectOverrides();
-            lifecycle.push("teardown");
-            if (mode === "teardown failure") throw new Error("fixture teardown failed");
-          },
-        };
-      },
-    });
-    mockedEvalDependencies.createDevelopmentServer.mockImplementation(() => {
-      expectOverrides();
-      return {
-        async start() {
-          lifecycle.push("start");
-          // The host reloads env files before it copies the environment into its worker.
-          await loadDevelopmentEnvironmentFiles(fixtureRoot);
-          expectOverrides();
-          if (mode === "startup failure") throw new Error("fixture startup failed");
-          return { url: "http://127.0.0.1:43123" };
-        },
-        async close() {
-          expectOverrides();
-          lifecycle.push("close");
-          if (mode === "close failure") throw new Error("fixture close failed");
-        },
-      };
-    });
-    mockedEvalDependencies.resolveEvalTargetHandle.mockImplementation(async () => {
-      expectOverrides();
-      return { kind: mode === "remote" ? "remote" : "local", url: "https://example.com" };
-    });
-    mockedEvalDependencies.executeEval.mockImplementation(async ({ evaluation }) => {
-      expectOverrides();
-      lifecycle.push("eval");
-      return makeEvalResult(mode === "eval failure" ? "beta" : evaluation.id);
-    });
+  it("runs setup once before local startup and tears down after server shutdown", async () => {
+    const fixture = await createEvalSetupFixture();
 
-    process.chdir(fixtureRoot);
-    try {
-      const run = runCli(
-        ["eval", "--skip-report", ...(mode === "remote" ? ["--url", "https://example.com"] : [])],
-        logger,
-      );
-      if (mode === "startup failure") await expect(run).rejects.toThrow("fixture startup failed");
-      else await run;
-    } finally {
-      process.chdir(previousCwd);
-    }
+    await fixture.run();
 
-    const expectedLifecycle = ["setup"];
-    if (mode !== "remote") expectedLifecycle.push("start");
-    if (mode !== "startup failure") expectedLifecycle.push("eval", "eval");
-    if (mode !== "remote") expectedLifecycle.push("close");
-    expectedLifecycle.push("teardown");
-    expect(lifecycle).toEqual(expectedLifecycle);
-    expectOverrides();
-    await loadDevelopmentEnvironmentFiles(fixtureRoot);
-    expectOverrides();
-    if (mode === "close failure" || mode === "teardown failure") {
-      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("Eval cleanup failed:"));
-    }
-    if (mode !== "startup failure") {
-      expect(exit).toHaveBeenCalledWith(mode.endsWith("failure") ? 1 : 0);
-    }
+    expect(fixture.setup).toHaveBeenCalledTimes(1);
+    expect(mockedEvalDependencies.executeEval).toHaveBeenCalledTimes(2);
+    expect(fixture.close).toHaveBeenCalledTimes(1);
+    expect(fixture.teardown).toHaveBeenCalledTimes(1);
+    expect(fixture.setup.mock.invocationCallOrder[0]).toBeLessThan(
+      fixture.start.mock.invocationCallOrder[0]!,
+    );
+    expect(fixture.close.mock.invocationCallOrder[0]).toBeLessThan(
+      fixture.teardown.mock.invocationCallOrder[0]!,
+    );
+    expect(fixture.exit).toHaveBeenCalledWith(0);
+    await loadDevelopmentEnvironmentFiles(fixture.appRoot);
+    expectSetupEnvironment();
   });
 
-  it.each(["setup failure", "list", "excluded"])(
-    "does not start a target after %s",
-    async (mode) => {
-      const fixtureRoot = await createEnvironmentFixture();
-      const previousCwd = process.cwd();
-      const setup = vi.fn(async () => {
-        throw new Error("fixture setup failed");
-      });
-      mockedEvalDependencies.discoverAndImportEvals.mockResolvedValue([
-        { ...makeEvaluation("first"), tags: ["skip"] },
-      ]);
-      mockedEvalDependencies.discoverEvalConfig.mockResolvedValue({ ...TEST_CONFIG, setup });
-      process.chdir(fixtureRoot);
-      try {
-        const args =
-          mode === "list" ? ["--list"] : mode === "excluded" ? ["--exclude-tag", "skip"] : [];
-        const run = runCli(["eval", ...args], { error: vi.fn(), log: vi.fn() });
-        if (mode === "setup failure") await expect(run).rejects.toThrow("fixture setup failed");
-        else await run;
-      } finally {
-        process.chdir(previousCwd);
-      }
-      expect(setup).toHaveBeenCalledTimes(mode === "setup failure" ? 1 : 0);
-      expect(mockedEvalDependencies.createDevelopmentServer).not.toHaveBeenCalled();
-      expect(mockedEvalDependencies.resolveEvalTargetHandle).not.toHaveBeenCalled();
-    },
-  );
+  it("runs setup and teardown locally for a remote target", async () => {
+    const fixture = await createEvalSetupFixture();
+    mockedEvalDependencies.resolveEvalTargetHandle.mockResolvedValue({
+      kind: "remote",
+      url: "https://example.com",
+    });
+
+    await fixture.run(["--url", "https://example.com"]);
+
+    expect(fixture.setup).toHaveBeenCalledTimes(1);
+    expect(fixture.setup.mock.invocationCallOrder[0]).toBeLessThan(
+      mockedEvalDependencies.resolveEvalTargetHandle.mock.invocationCallOrder[0]!,
+    );
+    expect(mockedEvalDependencies.createDevelopmentServer).not.toHaveBeenCalled();
+    expect(fixture.teardown).toHaveBeenCalledTimes(1);
+    expect(fixture.exit).toHaveBeenCalledWith(0);
+  });
+
+  it("tears down resources when local startup fails", async () => {
+    const fixture = await createEvalSetupFixture();
+    fixture.start.mockRejectedValueOnce(new Error("fixture startup failed"));
+
+    await expect(fixture.run()).rejects.toThrow("fixture startup failed");
+
+    expect(mockedEvalDependencies.executeEval).not.toHaveBeenCalled();
+    expect(fixture.close).toHaveBeenCalledTimes(1);
+    expect(fixture.teardown).toHaveBeenCalledTimes(1);
+    expect(fixture.close.mock.invocationCallOrder[0]).toBeLessThan(
+      fixture.teardown.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("tears down resources and fails the command when an eval fails", async () => {
+    const fixture = await createEvalSetupFixture();
+    mockedEvalDependencies.executeEval.mockResolvedValueOnce(makeEvalResult("beta"));
+
+    await fixture.run();
+
+    expect(fixture.close).toHaveBeenCalledTimes(1);
+    expect(fixture.teardown).toHaveBeenCalledTimes(1);
+    expect(fixture.exit).toHaveBeenCalledWith(1);
+  });
+
+  it("still tears down resources when server shutdown fails", async () => {
+    const fixture = await createEvalSetupFixture();
+    fixture.close.mockRejectedValueOnce(new Error("fixture close failed"));
+
+    await fixture.run();
+
+    expect(fixture.teardown).toHaveBeenCalledTimes(1);
+    expect(fixture.logger.error).toHaveBeenCalledWith("Eval cleanup failed: fixture close failed");
+    expect(fixture.exit).toHaveBeenCalledWith(1);
+  });
+
+  it("reports teardown failure without dropping environment overrides", async () => {
+    const fixture = await createEvalSetupFixture();
+    fixture.teardown.mockRejectedValueOnce(new Error("fixture teardown failed"));
+
+    await fixture.run();
+
+    expect(fixture.close).toHaveBeenCalledTimes(1);
+    expect(fixture.logger.error).toHaveBeenCalledWith(
+      "Eval cleanup failed: fixture teardown failed",
+    );
+    expect(fixture.exit).toHaveBeenCalledWith(1);
+    expectSetupEnvironment();
+  });
+
+  it("does not start a target or call teardown when setup fails", async () => {
+    const fixture = await createEvalSetupFixture();
+    fixture.setup.mockRejectedValueOnce(new Error("fixture setup failed"));
+
+    await expect(fixture.run()).rejects.toThrow("fixture setup failed");
+
+    expect(mockedEvalDependencies.createDevelopmentServer).not.toHaveBeenCalled();
+    expect(mockedEvalDependencies.resolveEvalTargetHandle).not.toHaveBeenCalled();
+    expect(fixture.teardown).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: "listing evals", args: ["--list"] },
+    { name: "excluding all evals", args: ["--exclude-tag", "setup"] },
+  ])("skips setup when $name", async ({ args }) => {
+    const fixture = await createEvalSetupFixture();
+
+    await fixture.run(args);
+
+    expect(fixture.setup).not.toHaveBeenCalled();
+    expect(mockedEvalDependencies.createDevelopmentServer).not.toHaveBeenCalled();
+    expect(mockedEvalDependencies.resolveEvalTargetHandle).not.toHaveBeenCalled();
+    expect(fixture.teardown).not.toHaveBeenCalled();
+  });
 
   it("loads local env files before resolving a remote target", async () => {
     const fixtureRoot = await createEnvironmentFixture();
@@ -393,6 +377,80 @@ describe("eve eval environment loading", () => {
     expect(exit).toHaveBeenCalledWith(1);
   });
 });
+
+async function createEvalSetupFixture() {
+  const appRoot = await realpath(await createEnvironmentFixture());
+  const logger = { error: vi.fn(), log: vi.fn() };
+  const exit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
+  const teardown = vi.fn(async () => {
+    expectSetupEnvironment();
+  });
+  const setup = vi.fn(async () => {
+    expect(process.env.EVE_DEV_SHARED).toBe("from-local");
+    return {
+      env: {
+        EVE_DEV_SHARED: "from-setup",
+        EVE_DEV_SHELL_ONLY: undefined,
+        EVE_DEV_DEFAULT_ONLY: undefined,
+        EVE_EVAL_SETUP_NEW: "new",
+      },
+      teardown,
+    };
+  });
+  const start = vi.fn(async () => {
+    expectSetupEnvironment();
+    // The host reloads env files before it copies the environment into its worker.
+    await loadDevelopmentEnvironmentFiles(appRoot);
+    expectSetupEnvironment();
+    return { url: "http://127.0.0.1:43123" };
+  });
+  const close = vi.fn(async () => {
+    expectSetupEnvironment();
+  });
+  process.env.EVE_DEV_SHELL_ONLY = "from-shell";
+  mockedEvalDependencies.discoverAndImportEvals.mockResolvedValue(
+    [makeEvaluation("first"), makeEvaluation("second")].map((evaluation) => ({
+      ...evaluation,
+      tags: ["setup"],
+    })),
+  );
+  mockedEvalDependencies.discoverEvalConfig.mockResolvedValue({ ...TEST_CONFIG, setup });
+  mockedEvalDependencies.createDevelopmentServer.mockReturnValue({ start, close });
+  mockedEvalDependencies.resolveEvalTargetHandle.mockResolvedValue({
+    kind: "local",
+    url: "http://127.0.0.1:43123",
+  });
+  mockedEvalDependencies.executeEval.mockImplementation(async ({ evaluation }) => {
+    expectSetupEnvironment();
+    return makeEvalResult(evaluation.id);
+  });
+
+  return {
+    appRoot,
+    logger,
+    exit,
+    setup,
+    start,
+    close,
+    teardown,
+    async run(args: string[] = []) {
+      const previousCwd = process.cwd();
+      process.chdir(appRoot);
+      try {
+        await runCli(["eval", "--skip-report", ...args], logger);
+      } finally {
+        process.chdir(previousCwd);
+      }
+    },
+  };
+}
+
+function expectSetupEnvironment(): void {
+  expect(process.env.EVE_DEV_SHARED).toBe("from-setup");
+  expect(process.env.EVE_DEV_SHELL_ONLY).toBeUndefined();
+  expect(process.env.EVE_DEV_DEFAULT_ONLY).toBeUndefined();
+  expect(process.env.EVE_EVAL_SETUP_NEW).toBe("new");
+}
 
 function makeEvaluation(id: string) {
   return {
