@@ -349,15 +349,16 @@ Define the model-visible router under `agent/tools/`. Build the JEV criteria fro
 
 ```ts title="agent/tools/route_task.ts"
 import { evaluate } from "eve/experimental/evaluate";
-import { defineWorkflowTool } from "eve/tools";
+import { defineWorkflowTool, type WorkflowToolContext } from "eve/tools";
 import { z } from "zod";
 
 type Criteria = Record<"researcher" | "operator", string>;
 
-async function chooseTarget(task: string, criteria: Criteria) {
+async function chooseTarget(task: string, criteria: Criteria, ctx: WorkflowToolContext) {
   "use step";
 
   const result = await evaluate({
+    abortSignal: ctx.abortSignal,
     state: { task },
     questions: {
       route: {
@@ -377,10 +378,14 @@ export default defineWorkflowTool({
   async execute({ task }, ctx) {
     "use workflow";
 
-    const target = await chooseTarget(task, {
-      researcher: ctx.agents.researcher.description,
-      operator: ctx.agents.operator.description,
-    });
+    const target = await chooseTarget(
+      task,
+      {
+        researcher: ctx.agents.researcher.description,
+        operator: ctx.agents.operator.description,
+      },
+      ctx,
+    );
 
     return ctx.agent(target, { message: task });
   },
