@@ -37,9 +37,8 @@ export function markBackgroundTaskStepInput(input: StepInput): StepInput {
 /** Projects the report group without changing the delivered task's activity root. */
 export function resolveTaskDeliveryContext(input: {
   readonly state: SessionStateMap | undefined;
-  readonly taskDeliveryId: string;
-  readonly taskDeliveryIds?: readonly string[];
-  readonly wakePolicy?: TaskWakePolicy;
+  readonly taskDeliveryIds: readonly string[];
+  readonly wakePolicy: TaskWakePolicy;
 }):
   | {
       readonly context: string;
@@ -47,14 +46,15 @@ export function resolveTaskDeliveryContext(input: {
       readonly rootTurnId: string;
     }
   | undefined {
+  const firstDeliveryId = input.taskDeliveryIds[0];
+  if (firstDeliveryId === undefined) return undefined;
   const entries = getSessionTaskIndex(input.state);
-  const delivered = entries.find((entry) => input.taskDeliveryId.startsWith(`${entry.taskId}:`));
+  const delivered = entries.find((entry) => firstDeliveryId.startsWith(`${entry.taskId}:`));
   if (delivered === undefined) return undefined;
 
-  const deliveryIds = input.taskDeliveryIds ?? [input.taskDeliveryId];
   const cohort = entries.filter((entry) =>
     input.wakePolicy === "individual"
-      ? deliveryIds.some((id) => id.startsWith(`${entry.taskId}:`))
+      ? input.taskDeliveryIds.some((id) => id.startsWith(`${entry.taskId}:`))
       : getTaskCohortId(entry) === getTaskCohortId(delivered),
   );
   return { ...projectTaskCohort(cohort), rootTurnId: delivered.createdByTurnId };

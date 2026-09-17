@@ -910,7 +910,7 @@ describe("createToolLoopHarness", () => {
     };
     const report = resolveTaskDeliveryContext({
       state: session.state,
-      taskDeliveryId: "A:ready:completed",
+      taskDeliveryIds: ["A:ready:completed"],
       wakePolicy: "individual",
     })!;
     const ctx = new ContextContainer();
@@ -939,7 +939,7 @@ describe("createToolLoopHarness", () => {
     };
     const finalReport = resolveTaskDeliveryContext({
       state: session.state,
-      taskDeliveryId: "B:ready:completed",
+      taskDeliveryIds: ["B:ready:completed"],
       wakePolicy: "individual",
     })!;
     ctx.set(TurnTaskDeliveryKey, finalReport.phase);

@@ -120,7 +120,7 @@ describe("resolveTaskDeliveryContext", () => {
     ]);
     const result = resolveTaskDeliveryContext({
       state,
-      taskDeliveryId: "task_2:ready:completed",
+      taskDeliveryIds: ["task_2:ready:completed"],
       wakePolicy: "individual",
     });
     expect(result?.phase).toBe("settled");
@@ -132,11 +132,11 @@ describe("resolveTaskDeliveryContext", () => {
     });
     const batch = resolveTaskDeliveryContext({
       state,
-      taskDeliveryId: "task_1:ready:completed",
       wakePolicy: "individual",
-      taskDeliveryIds: ["task_1:ready:completed", "task_2:ready:completed"],
+      taskDeliveryIds: ["task_2:ready:completed", "task_1:ready:completed"],
     });
     expect(batch?.phase).toBe("settled");
+    expect(batch?.rootTurnId).toBe("turn_2");
     expect(
       JSON.parse(batch!.context.slice(TASK_DELIVERY_CONTEXT_LABEL.length)).tasks.map(
         (task: { taskId: string }) => task.taskId,
@@ -147,7 +147,7 @@ describe("resolveTaskDeliveryContext", () => {
   it("individual keeps an advisory wake pending until the delivered task is terminal", () => {
     const result = resolveTaskDeliveryContext({
       state: taskState([taskEntry("task_1", "turn_1")]),
-      taskDeliveryId: "task_1:message:1",
+      taskDeliveryIds: ["task_1:message:1"],
       wakePolicy: "individual",
     });
     expect(result?.phase).toBe("pending");
@@ -166,14 +166,18 @@ describe("resolveTaskDeliveryContext", () => {
       taskEntry("task_3", "turn_1"),
     ]);
 
-    expect(resolveTaskDeliveryContext({ state, taskDeliveryId: "task_1:ready:completed" })).toEqual(
-      {
-        context:
-          '[Task state]\n{"tasks":[{"name":"report_probe","status":"completed","taskId":"task_1"},{"name":"report_probe","status":"pending","taskId":"task_2"}]}',
-        phase: "pending",
-        rootTurnId: "turn_1",
-      },
-    );
+    expect(
+      resolveTaskDeliveryContext({
+        state,
+        taskDeliveryIds: ["task_1:ready:completed"],
+        wakePolicy: "cohort",
+      }),
+    ).toEqual({
+      context:
+        '[Task state]\n{"tasks":[{"name":"report_probe","status":"completed","taskId":"task_1"},{"name":"report_probe","status":"pending","taskId":"task_2"}]}',
+      phase: "pending",
+      rootTurnId: "turn_1",
+    });
   });
 
   it("includes every output once the parent has received the whole terminal cohort", () => {
@@ -196,7 +200,8 @@ describe("resolveTaskDeliveryContext", () => {
           taskEntry("task_1", "turn_1", first),
           { ...taskEntry("task_2", "turn_2", second), cohortId: "task_1" },
         ]),
-        taskDeliveryId: "task_2:ready:completed",
+        taskDeliveryIds: ["task_2:ready:completed"],
+        wakePolicy: "cohort",
       }),
     ).toEqual({
       context:
@@ -227,7 +232,8 @@ describe("resolveTaskDeliveryContext", () => {
     ]);
     const result = resolveTaskDeliveryContext({
       state,
-      taskDeliveryId: "task_cancelled:ready:cancelled",
+      taskDeliveryIds: ["task_cancelled:ready:cancelled"],
+      wakePolicy: "cohort",
     });
     expect(result).toMatchObject({ phase: "settled", rootTurnId: "turn_2" });
     expect(JSON.parse(result!.context.slice(`${TASK_DELIVERY_CONTEXT_LABEL}\n`.length))).toEqual({
@@ -242,14 +248,18 @@ describe("resolveTaskDeliveryContext", () => {
     expect(result!.context).not.toContain("createdByTurnId");
   });
 
-  it("returns no context when the delivery is not owned by the session task index", () => {
-    expect(
-      resolveTaskDeliveryContext({
-        state: taskState([taskEntry("task_1", "turn_1")]),
-        taskDeliveryId: "task_unknown:ready:completed",
-      }),
-    ).toBeUndefined();
-  });
+  it.each([{ taskDeliveryIds: [] }, { taskDeliveryIds: ["task_unknown:ready:completed"] }])(
+    "returns no context for missing or unowned deliveries: $taskDeliveryIds",
+    ({ taskDeliveryIds }) => {
+      expect(
+        resolveTaskDeliveryContext({
+          state: taskState([taskEntry("task_1", "turn_1")]),
+          taskDeliveryIds,
+          wakePolicy: "cohort",
+        }),
+      ).toBeUndefined();
+    },
+  );
 });
 
 function taskEntry(

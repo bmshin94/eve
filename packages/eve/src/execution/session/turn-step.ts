@@ -285,8 +285,9 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     if (resolved !== undefined && backgroundTaskDelivery !== undefined) {
       const taskContext = resolveTaskDeliveryContext({
         state: durableSession.state,
-        taskDeliveryId: backgroundTaskDelivery.taskDeliveryId,
-        taskDeliveryIds: backgroundTaskDelivery.taskDeliveryIds,
+        taskDeliveryIds: backgroundTaskDelivery.taskDeliveryIds ?? [
+          backgroundTaskDelivery.taskDeliveryId,
+        ],
         wakePolicy: taskWakePolicy,
       });
       if (taskContext !== undefined) {
