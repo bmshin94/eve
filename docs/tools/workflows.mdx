@@ -352,11 +352,6 @@ import { evaluate } from "eve/experimental/evaluate";
 import { defineWorkflowTool } from "eve/tools";
 import { z } from "zod";
 
-const targets = {
-  research: "researcher",
-  operations: "operator",
-} as const;
-
 async function chooseTarget(task: string) {
   "use step";
 
@@ -368,8 +363,8 @@ async function chooseTarget(task: string) {
         type: "choice",
         instructions: "Which specialist should handle this task?",
         criteria: {
-          research: "Investigation, analysis, and explanation",
-          operations: "Execution and operational changes",
+          researcher: "Investigation, analysis, and explanation",
+          operator: "Execution and operational changes",
         },
       },
     },
@@ -384,13 +379,13 @@ export default defineWorkflowTool({
   async execute({ task }, ctx) {
     "use workflow";
 
-    const route = await chooseTarget(task);
-    return ctx.agent(targets[route], { message: task });
+    const target = await chooseTarget(task);
+    return ctx.agent(target, { message: task });
   },
 });
 ```
 
-The parent model receives `route_task`, but not `researcher` or `operator`. When it calls `route_task`, JEV returns the typed `"research" | "operations"` choice, and the workflow maps that choice to the corresponding subagent. The subagent's result becomes the `route_task` tool result.
+The parent model receives `route_task`, but not `researcher` or `operator`. When it calls `route_task`, JEV returns the typed `"researcher" | "operator"` choice. Because each choice key matches a path-derived subagent name, the workflow passes it directly to `ctx.agent()`. The subagent's result becomes the `route_task` tool result.
 
 This pattern controls specialist selection, not whether the parent model delegates at all. Route before the parent model runs if every incoming request must go through JEV.
 
