@@ -438,9 +438,11 @@ describe("registry commands", () => {
     },
   );
 
-  it("rejects Web Chat before it can write into an agent workspace member", async () => {
+  it("installs Web Chat at the environment root for a selected workspace agent", async () => {
     const logger = createLogger();
     const appRoot = "/project/agents/support";
+    const prepareWebRegistryProject = vi.fn(async () => {});
+    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
     resolveEveProjectContext.mockResolvedValue({
       environmentRoot: "/project",
       kind: "workspace-member",
@@ -450,15 +452,46 @@ describe("registry commands", () => {
         members: [{ appRoot, name: "support" }],
       },
     });
-
-    await runAddCommand(logger, appRoot, "channel/web", {});
-
-    expect(logger.errors).toEqual([
-      "Web Chat installs a project-level Next.js application and cannot currently be added to a top-level agents/ workspace. Configure a root Next.js app with withEve({ agents }) instead.",
+    getRegistryItems.mockResolvedValue([
+      {
+        name: "channel/web",
+        type: "registry:item",
+        meta: {
+          eve: {
+            setup: [{ package: "eve", bin: "eve", args: ["integration", "setup", "web"] }],
+          },
+        },
+      },
     ]);
-    expect(getRegistryItems).not.toHaveBeenCalled();
-    expect(addRegistryItems).not.toHaveBeenCalled();
-    expect(process.exitCode).toBe(1);
+
+    await runAddCommand(
+      logger,
+      appRoot,
+      "channel/web",
+      { yes: true },
+      {
+        loadSetupCommandRunner: async () => runSetupCommand,
+        prepareWebRegistryProject,
+      },
+    );
+
+    expect(logger.errors).toEqual([]);
+    expect(writeFile).toHaveBeenCalledWith(
+      "/project/package.json",
+      expect.stringContaining('"dev:web": "cd apps/web && next dev"'),
+      "utf8",
+    );
+    expect(prepareWebRegistryProject).toHaveBeenCalledWith("/project");
+    expect(addRegistryItems).toHaveBeenCalledWith(
+      ["https://eve.dev/r/channel/web.json"],
+      expect.objectContaining({ cwd: "/project" }),
+    );
+    expect(runSetupCommand).toHaveBeenCalledWith(
+      appRoot,
+      expect.objectContaining({ args: ["integration", "setup", "web", "--yes"] }),
+      "channel/web",
+      expect.any(Object),
+    );
   });
 
   it("surfaces required deployment in non-interactive completion", async () => {
