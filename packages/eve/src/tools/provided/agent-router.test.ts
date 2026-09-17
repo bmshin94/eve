@@ -1,20 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { autoRouter } from "#tools/provided/auto-router.js";
-import { executeAutoRouterTool } from "#execution/tools/auto-router.js";
+import { agentRouter } from "#tools/provided/agent-router.js";
+import { executeAgentRouterTool } from "#execution/tools/agent-router.js";
 import { evaluate } from "#ai/evaluate.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 
 vi.mock("#ai/evaluate.js", () => ({ evaluate: vi.fn() }));
 
-describe("autoRouter", () => {
+describe("agentRouter", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("defines a workflow tool", () => {
-    const definition = autoRouter();
+    const definition = agentRouter();
 
     expect(definition.description).toContain("best available subagent");
-    expect(definition.execute).toBe(executeAutoRouterTool);
+    expect(definition.execute).toBe(executeAgentRouterTool);
   });
 
   it("routes through all workflow agent descriptions", async () => {
@@ -32,7 +32,7 @@ describe("autoRouter", () => {
       },
     });
 
-    await expect(executeAutoRouterTool({ message: "Deploy the service" }, ctx)).resolves.toBe(
+    await expect(executeAgentRouterTool({ message: "Deploy the service" }, ctx)).resolves.toBe(
       "operated",
     );
     expect(evaluate).toHaveBeenCalledWith({
@@ -59,7 +59,7 @@ describe("autoRouter", () => {
       agents: { researcher: { description: "Investigate and explain." } },
     });
 
-    await expect(executeAutoRouterTool({ message: "Investigate" }, ctx)).resolves.toBe(
+    await expect(executeAgentRouterTool({ message: "Investigate" }, ctx)).resolves.toBe(
       "researched",
     );
     expect(evaluate).not.toHaveBeenCalled();
@@ -82,7 +82,7 @@ describe("autoRouter", () => {
       type: "object",
     } as const;
 
-    await executeAutoRouterTool({ message: "Investigate", outputSchema }, ctx);
+    await executeAgentRouterTool({ message: "Investigate", outputSchema }, ctx);
 
     expect(agent).toHaveBeenCalledWith("researcher", {
       message: "Investigate",
@@ -93,8 +93,8 @@ describe("autoRouter", () => {
   it("rejects an empty agent map before evaluation", async () => {
     const ctx = { agents: {} } as WorkflowToolContext;
 
-    await expect(executeAutoRouterTool({ message: "Route me" }, ctx)).rejects.toThrow(
-      "autoRouter requires at least one available declared subagent.",
+    await expect(executeAgentRouterTool({ message: "Route me" }, ctx)).rejects.toThrow(
+      "agentRouter requires at least one available declared subagent.",
     );
     expect(evaluate).not.toHaveBeenCalled();
   });

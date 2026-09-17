@@ -14,23 +14,13 @@ export default defineAgent({
       if (request.tools.some((tool) => ["agent", "operator", "researcher"].includes(tool.name))) {
         throw new Error("A hidden agent tool was exposed to the model.");
       }
-      const autoRouter = request.userMessages.some((message) =>
-        message.includes("deploy the checkout service"),
-      );
       const inspectAgents = request.userMessages.some((message) =>
         message.includes("E2E_INSPECT_WORKFLOW_AGENTS"),
       );
-      const toolName = autoRouter ? "route-task" : inspectAgents ? "inspect-agents" : "invoke-self";
+      const toolName = inspectAgents ? "inspect-agents" : "invoke-self";
       const result = request.toolResults.find((entry) => entry.name === toolName);
       return result === undefined
-        ? {
-            toolCalls: [
-              {
-                name: toolName,
-                input: autoRouter ? { message: "Deploy the checkout service to production." } : {},
-              },
-            ],
-          }
+        ? { toolCalls: [{ name: toolName, input: {} }] }
         : JSON.stringify(result.output);
     },
   }),

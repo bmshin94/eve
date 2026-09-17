@@ -347,7 +347,7 @@ export default defineAgent({
 
 Define the model-visible router under `agent/tools/`. Build the JEV criteria from the subagents' effective descriptions, then pass its typed choice directly to `ctx.agent()`:
 
-```ts title="agent/tools/route_task.ts"
+```ts title="agent/tools/agent-router.ts"
 import { evaluate } from "eve/ai";
 import { defineWorkflowTool, type WorkflowToolContext } from "eve/tools";
 import { z } from "zod";
@@ -386,21 +386,21 @@ export default defineWorkflowTool({
 });
 ```
 
-The evaluation runs in a step so workflow replay records its result instead of making the routing request again. The parent model receives `route_task`, but not `researcher` or `operator`. JEV returns the typed `"researcher" | "operator"` choice, and the selected subagent's result becomes the `route_task` tool result.
+The evaluation runs in a step so workflow replay records its result instead of making the routing request again. The parent model receives `agent-router`, but not `researcher` or `operator`. JEV returns the typed `"researcher" | "operator"` choice, and the selected subagent's result becomes the `agent-router` tool result.
 
 `ctx.agents` is a replay-stable metadata snapshot taken when the workflow starts. It includes agents hidden from the parent model with `tool: false` or `disableTool()`, but exposes no model definitions, credentials, or callbacks. Invocation still checks the subagent's availability through `ctx.agent()`.
 
 #### Route across every subagent
 
-Use `autoRouter()` when the router should consider every available declared subagent with the default JEV routing instructions:
+Use `agentRouter()` when the router should consider every available declared subagent with the default JEV routing instructions:
 
-```ts title="agent/tools/route_task.ts"
-import { autoRouter } from "eve/tools/auto-router";
+```ts title="agent/tools/agent-router.ts"
+import { agentRouter } from "eve/tools/agent-router";
 
-export default autoRouter();
+export default agentRouter();
 ```
 
-Its input is `{ message: string, outputSchema?: object }`. With two or more available subagents, `autoRouter()` sends the message and every effective description to JEV, then invokes the selected path-derived name through `ctx.agent()`. It invokes a sole available subagent without evaluation and forwards an optional `outputSchema`. The built-in root-copy `agent` target is not included.
+Its input is `{ message: string, outputSchema?: object }`. With two or more available subagents, `agentRouter()` sends the message and every effective description to JEV, then invokes the selected path-derived name through `ctx.agent()`. It invokes a sole available subagent without evaluation and forwards an optional `outputSchema`. The built-in root-copy `agent` target is not included.
 
 This pattern controls specialist selection, not whether the parent model delegates at all. Route before the parent model runs if every incoming request must go through JEV.
 
