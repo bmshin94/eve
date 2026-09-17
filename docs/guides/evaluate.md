@@ -142,7 +142,7 @@ export default defineTool({
 
 The choice above is typed as `"billing" | "support"`. Each question appears under
 its authored key in `result.answers`. Results also include token usage, warnings,
-provider metadata, and response metadata.
+provider metadata, and response metadata. To use that choice to delegate while keeping specialist subagents out of the parent model's tools, see [Route to a hidden subagent with JEV](/docs/tools/workflows#route-to-a-hidden-subagent-with-jev).
 
 `evaluate` accepts AI SDK evaluation options, including `maxRetries`, `headers`,
 and `providerOptions`. Pass an `abortSignal` to cancel the request. Input and
