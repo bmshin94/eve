@@ -1,5 +1,5 @@
 import type { SessionHandle } from "#channel/session.js";
-import type { SessionAuthContext, TurnPolicy, TaskWakePolicy } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy, TaskDeliveryPolicy } from "#channel/types.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
 import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -179,8 +179,8 @@ export interface LinearChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
-  /** Background task result delivery policy. Defaults to "individual", or "cohort" for schedule-started sessions. */
-  readonly taskWakePolicy?: TaskWakePolicy;
+  /** Background task reporting policy. Defaults to "auto"; schedules use their own policy. */
+  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
 
   /** Inbound Agent Session hook. Defaults to dispatching `created` and `prompted` events. */
   onAgentSession?(
@@ -215,7 +215,7 @@ export function linearChannel(config: LinearChannelConfig = {}): LinearChannel {
   >({
     kindHint: "linear",
     turnPolicy: config.turnPolicy,
-    taskWakePolicy: config.taskWakePolicy,
+    taskDeliveryPolicy: config.taskDeliveryPolicy,
     state: initialLinearState(),
     metadata(state): LinearInstrumentationMetadata {
       return {

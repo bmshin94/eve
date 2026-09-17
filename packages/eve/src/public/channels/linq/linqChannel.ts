@@ -1,4 +1,4 @@
-import type { SessionAuthContext, TurnPolicy, TaskWakePolicy } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy, TaskDeliveryPolicy } from "#channel/types.js";
 import { vercelOidc } from "#public/channels/auth.js";
 import {
   chatSdkChannel,
@@ -67,8 +67,8 @@ export interface LinqChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
-  /** Background task result delivery policy. Defaults to "individual", or "cohort" for schedule-started sessions. */
-  readonly taskWakePolicy?: TaskWakePolicy;
+  /** Background task reporting policy. Defaults to "auto"; schedules use their own policy. */
+  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
   /** Display name used by the Chat SDK runtime. Defaults to `"eve"`. */
   readonly userName?: string;
 }
@@ -105,7 +105,7 @@ export function linqChannel(config: LinqChannelConfig): LinqChannel {
     state: createMemoryState(),
     streaming: false,
     turnPolicy: config.turnPolicy,
-    taskWakePolicy: config.taskWakePolicy,
+    taskDeliveryPolicy: config.taskDeliveryPolicy,
     userName: config.userName ?? "eve",
   });
   const onMessage = config.onMessage ?? defaultOnMessage;

@@ -48,6 +48,7 @@ export async function compileScheduleDefinition(
 
   const compiled = {
     cron: definition.cron,
+    taskDeliveryPolicy: definition.taskDeliveryPolicy,
     hasRun: definition.run !== undefined,
     logicalPath: source.logicalPath,
     name: deriveScheduleName(source.logicalPath),

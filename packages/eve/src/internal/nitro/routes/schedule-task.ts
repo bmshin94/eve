@@ -1,4 +1,8 @@
-import { expectScheduleRun, ScheduleDispatcher } from "#channel/schedule.js";
+import {
+  expectScheduleRun,
+  ScheduleDispatcher,
+  type ScheduleDispatchInput,
+} from "#channel/schedule.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import { loadResolvedCompiledScheduleByTaskName } from "#runtime/schedules/resolve-schedule.js";
@@ -43,17 +47,12 @@ export async function dispatchScheduleTaskFromArtifacts(
     channels: bundle.graph.root.channels,
   });
 
-  const dispatchInput: {
-    scheduleId: string;
-    run?: Awaited<ReturnType<typeof loadScheduleRun>>;
-    markdown?: string;
-  } = { scheduleId: schedule.name };
-  if (schedule.hasRun) {
-    dispatchInput.run = await loadScheduleRun(schedule, bundle.moduleMap);
-  }
-  if (schedule.markdown !== undefined) {
-    dispatchInput.markdown = schedule.markdown;
-  }
+  const dispatchInput: ScheduleDispatchInput = {
+    scheduleId: schedule.name,
+    taskDeliveryPolicy: schedule.taskDeliveryPolicy,
+    run: schedule.hasRun ? await loadScheduleRun(schedule, bundle.moduleMap) : undefined,
+    markdown: schedule.markdown,
+  };
 
   const result = await dispatcher.trigger(dispatchInput);
 

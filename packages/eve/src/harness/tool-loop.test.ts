@@ -35,6 +35,7 @@ import {
   SessionDynamicSubagentSelectionsKey,
   StepDynamicToolMetadataKey,
   TurnTaskDeliveryKey,
+  TaskDeliveryPolicyKey,
 } from "#context/keys.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { invocationOwnerKey } from "#internal/invocation/metadata.js";
@@ -894,10 +895,10 @@ describe("createToolLoopHarness", () => {
       payloads: [{ message: "A completed" }],
     });
     expect(
-      queue.takeNext(getSessionTaskCohorts(session.state), { wakePolicy: "cohort" }),
+      queue.takeNext(getSessionTaskCohorts(session.state), { taskDeliveryPolicy: "cohort" }),
     ).toBeUndefined();
     expect(
-      queue.takeNext(getSessionTaskCohorts(session.state), { wakePolicy: "individual" })?.kind,
+      queue.takeNext(getSessionTaskCohorts(session.state), { taskDeliveryPolicy: "auto" })?.kind,
     ).toBe("turn");
     session = {
       ...session,
@@ -911,7 +912,7 @@ describe("createToolLoopHarness", () => {
     const report = resolveTaskDeliveryContext({
       state: session.state,
       taskDeliveryIds: ["A:ready:completed"],
-      wakePolicy: "individual",
+      taskDeliveryPolicy: "auto",
     })!;
     const ctx = new ContextContainer();
     ctx.set(ScheduleIdKey, "scheduled-report");
@@ -940,7 +941,7 @@ describe("createToolLoopHarness", () => {
     const finalReport = resolveTaskDeliveryContext({
       state: session.state,
       taskDeliveryIds: ["B:ready:completed"],
-      wakePolicy: "individual",
+      taskDeliveryPolicy: "auto",
     })!;
     ctx.set(TurnTaskDeliveryKey, finalReport.phase);
     const finalScope = await backgroundToolExecutionProvider.create(ctx, session);
@@ -13299,6 +13300,46 @@ describe("createToolLoopHarness", () => {
         { kind: "user" as const, role: "user", content: "What is 7 times 8?" },
       ]);
     });
+
+    it.each(["pending", "settled"] as const)(
+      "auto permits a silent %s result turn",
+      async (phase) => {
+        setupMockAgent({
+          finishReason: "stop",
+          response: { messages: [{ role: "assistant", content: EMPTY_DELIVERY_SENTINEL }] },
+          text: EMPTY_DELIVERY_SENTINEL,
+          toolCalls: [],
+          toolResults: [],
+        });
+        const ctx = new ContextContainer();
+        ctx.set(TurnTaskDeliveryKey, phase);
+        ctx.set(TaskDeliveryPolicyKey, "auto");
+        const { emit, events } = createEventCollector();
+        const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+        const result = await contextStorage.run(ctx, () =>
+          runStep(
+            createTestSession(),
+            markFrameworkStepInput(
+              { message: "Background task A completed." },
+              "execution.background_task",
+            ),
+          ),
+        );
+        expect(result.next).toBeNull();
+        expect(getLastAgentSettings().messages).toContainEqual(
+          expect.objectContaining({
+            content: expect.stringContaining("previously withheld results"),
+          }),
+        );
+        expect(events).toContainEqual(
+          expect.objectContaining({
+            type: "message.completed",
+            data: expect.objectContaining({ message: null }),
+          }),
+        );
+        expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
+      },
+    );
 
     it("adds settled task-delivery guidance to a top-level framework wake", async () => {
       setupMockAgent(defaultModelResult());

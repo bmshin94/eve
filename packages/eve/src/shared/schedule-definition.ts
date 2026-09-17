@@ -1,3 +1,5 @@
+import type { TaskDeliveryPolicy } from "#channel/types.js";
+
 /**
  * The `run` form of {@link ScheduleDefinition} invokes this handler when a
  * schedule's cron fires. It receives {@link ScheduleHandlerArgs} (`to`,
@@ -8,6 +10,8 @@ export type GenericScheduleRunHandler<TArgs> = (args: TArgs) => Promise<void> | 
 /** Constraint shape that bounds the authored keys accepted by {@link defineSchedule}. */
 export interface GenericScheduleDefinitionFields<TArgs> {
   readonly cron: string;
+  /** Background task reporting policy. Defaults to "cohort". */
+  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
   readonly markdown?: string;
   readonly run?: GenericScheduleRunHandler<TArgs>;
 }
@@ -28,11 +32,15 @@ export interface GenericScheduleDefinitionFields<TArgs> {
 export type GenericScheduleDefinition<TArgs> =
   | {
       readonly cron: string;
+      /** Background task reporting policy. Defaults to "cohort". */
+      readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
       readonly markdown: string;
       readonly run?: never;
     }
   | {
       readonly cron: string;
+      /** Background task reporting policy. Defaults to "cohort". */
+      readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
       readonly markdown?: never;
       readonly run: GenericScheduleRunHandler<TArgs>;
     };

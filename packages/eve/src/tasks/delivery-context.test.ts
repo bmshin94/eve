@@ -101,7 +101,7 @@ describe("resolveInitiatingTaskContext", () => {
 });
 
 describe("resolveTaskDeliveryContext", () => {
-  it("individual projects only the delivered results while another task is unfinished", () => {
+  it("auto retains earlier outputs and pending siblings for a later combined report", () => {
     const first = {
       taskId: "task_1",
       status: "completed",
@@ -121,34 +121,30 @@ describe("resolveTaskDeliveryContext", () => {
     const result = resolveTaskDeliveryContext({
       state,
       taskDeliveryIds: ["task_2:ready:completed"],
-      wakePolicy: "individual",
+      taskDeliveryPolicy: "auto",
     });
-    expect(result?.phase).toBe("settled");
+    expect(result?.phase).toBe("pending");
     expect(result?.rootTurnId).toBe("turn_2");
     expect(JSON.parse(result!.context.slice(TASK_DELIVERY_CONTEXT_LABEL.length))).toEqual({
       tasks: [
+        { name: metadata.name, output: first.lastOutput, status: "completed", taskId: "task_1" },
         { name: metadata.name, output: second.lastOutput, status: "completed", taskId: "task_2" },
+        { name: metadata.name, status: "pending", taskId: "task_3" },
       ],
     });
     const batch = resolveTaskDeliveryContext({
       state,
-      wakePolicy: "individual",
       taskDeliveryIds: ["task_2:ready:completed", "task_1:ready:completed"],
+      taskDeliveryPolicy: "auto",
     });
-    expect(batch?.phase).toBe("settled");
-    expect(batch?.rootTurnId).toBe("turn_2");
-    expect(
-      JSON.parse(batch!.context.slice(TASK_DELIVERY_CONTEXT_LABEL.length)).tasks.map(
-        (task: { taskId: string }) => task.taskId,
-      ),
-    ).toEqual(["task_1", "task_2"]);
+    expect(batch).toEqual(result);
   });
 
-  it("individual keeps an advisory wake pending until the delivered task is terminal", () => {
+  it("auto keeps an advisory wake pending until the delivered task is terminal", () => {
     const result = resolveTaskDeliveryContext({
       state: taskState([taskEntry("task_1", "turn_1")]),
       taskDeliveryIds: ["task_1:message:1"],
-      wakePolicy: "individual",
+      taskDeliveryPolicy: "auto",
     });
     expect(result?.phase).toBe("pending");
   });
@@ -170,7 +166,7 @@ describe("resolveTaskDeliveryContext", () => {
       resolveTaskDeliveryContext({
         state,
         taskDeliveryIds: ["task_1:ready:completed"],
-        wakePolicy: "cohort",
+        taskDeliveryPolicy: "cohort",
       }),
     ).toEqual({
       context:
@@ -201,7 +197,7 @@ describe("resolveTaskDeliveryContext", () => {
           { ...taskEntry("task_2", "turn_2", second), cohortId: "task_1" },
         ]),
         taskDeliveryIds: ["task_2:ready:completed"],
-        wakePolicy: "cohort",
+        taskDeliveryPolicy: "cohort",
       }),
     ).toEqual({
       context:
@@ -233,7 +229,7 @@ describe("resolveTaskDeliveryContext", () => {
     const result = resolveTaskDeliveryContext({
       state,
       taskDeliveryIds: ["task_cancelled:ready:cancelled"],
-      wakePolicy: "cohort",
+      taskDeliveryPolicy: "cohort",
     });
     expect(result).toMatchObject({ phase: "settled", rootTurnId: "turn_2" });
     expect(JSON.parse(result!.context.slice(`${TASK_DELIVERY_CONTEXT_LABEL}\n`.length))).toEqual({
@@ -255,7 +251,7 @@ describe("resolveTaskDeliveryContext", () => {
         resolveTaskDeliveryContext({
           state: taskState([taskEntry("task_1", "turn_1")]),
           taskDeliveryIds,
-          wakePolicy: "cohort",
+          taskDeliveryPolicy: "cohort",
         }),
       ).toBeUndefined();
     },

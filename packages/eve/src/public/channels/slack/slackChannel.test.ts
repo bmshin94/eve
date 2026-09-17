@@ -427,11 +427,13 @@ async function firePost(
 }
 
 describe("slackChannel()", () => {
-  it.each(["cohort", "individual"] as const)(
-    "uses its own task wake policy: %s",
-    (taskWakePolicy) => {
-      expect(getAdapter(slackChannel({ taskWakePolicy })).taskWakePolicy).toBe(taskWakePolicy);
-      expect(getAdapter(slackChannel()).taskWakePolicy).toBeUndefined();
+  it.each(["cohort", "auto"] as const)(
+    "uses its own task delivery policy: %s",
+    (taskDeliveryPolicy) => {
+      expect(getAdapter(slackChannel({ taskDeliveryPolicy })).taskDeliveryPolicy).toBe(
+        taskDeliveryPolicy,
+      );
+      expect(getAdapter(slackChannel()).taskDeliveryPolicy).toBeUndefined();
     },
   );
   it("preserves the configured turn policy", () => {

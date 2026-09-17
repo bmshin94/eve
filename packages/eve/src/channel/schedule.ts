@@ -2,9 +2,9 @@ import type { ChannelAdapter } from "#channel/adapter.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-channel-receive.js";
 import { createSession, type Session } from "#channel/session.js";
-import type { Runtime } from "#channel/types.js";
+import type { Runtime, TaskDeliveryPolicy } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { ScheduleIdKey } from "#context/keys.js";
+import { ScheduleIdKey, TaskDeliveryPolicyKey } from "#context/keys.js";
 import { expectFunction } from "#internal/authored-module.js";
 import type {
   ScheduleDefinition,
@@ -27,7 +27,7 @@ export const SCHEDULE_ADAPTER_KIND = "schedule";
 
 export const SCHEDULE_ADAPTER: ChannelAdapter = {
   kind: SCHEDULE_ADAPTER_KIND,
-  taskWakePolicy: "cohort",
+  taskDeliveryPolicy: "cohort",
 };
 
 /**
@@ -36,6 +36,7 @@ export const SCHEDULE_ADAPTER: ChannelAdapter = {
  */
 export interface ScheduleDispatchInput {
   readonly scheduleId: string;
+  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
   readonly run?: ScheduleRunHandler;
   readonly markdown?: string;
 }
@@ -77,6 +78,7 @@ export class ScheduleDispatcher {
   async trigger(input: ScheduleDispatchInput): Promise<ScheduleDispatchResult> {
     const scope = new ContextContainer();
     scope.set(ScheduleIdKey, input.scheduleId);
+    scope.set(TaskDeliveryPolicyKey, input.taskDeliveryPolicy ?? "cohort");
     return await contextStorage.run(scope, () => this.triggerInScope(input));
   }
 

@@ -159,6 +159,12 @@ What's the temp in NYC?`;
     );
   });
 
+  it("preserves a schedule delivery override from markdown frontmatter", () => {
+    expect(
+      lowerScheduleMarkdown('---\ncron: "0 9 * * *"\ntaskDeliveryPolicy: auto\n---\nReport'),
+    ).toMatchObject({ taskDeliveryPolicy: "auto", markdown: "Report" });
+  });
+
   it("requires schedule markdown to declare frontmatter", () => {
     expect(() => lowerScheduleMarkdown("just a body")).toThrow(
       'Schedule markdown must start with YAML frontmatter declaring "cron".',

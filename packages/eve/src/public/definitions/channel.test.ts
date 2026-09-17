@@ -38,10 +38,10 @@ function getAdapter(channel: unknown): ChannelAdapter<any> {
 }
 
 describe("defineChannel", () => {
-  it.each(["cohort", "individual"] as const)(
+  it.each(["cohort", "auto"] as const)(
     "retains a policy-only channel across step boundaries: %s",
-    async (taskWakePolicy) => {
-      const channel = defineChannel({ routes: [], taskWakePolicy });
+    async (taskDeliveryPolicy) => {
+      const channel = defineChannel({ routes: [], taskDeliveryPolicy });
       const adapter = getAdapter(channel);
       expect(adapter.kind).not.toBe("http");
       const ctx = new ContextContainer();
@@ -51,20 +51,20 @@ describe("defineChannel", () => {
       ctx.set(BundleKey, { adapterRegistry } as CompiledBundle);
       const codec = ChannelKey.codec!;
       const restored = await codec.deserialize(codec.serialize!(adapter), ctx);
-      expect(restored.taskWakePolicy).toBe(taskWakePolicy);
-      expect(getAdapter(defineChannel({ routes: [] })).taskWakePolicy).toBeUndefined();
+      expect(restored.taskDeliveryPolicy).toBe(taskDeliveryPolicy);
+      expect(getAdapter(defineChannel({ routes: [] })).taskDeliveryPolicy).toBeUndefined();
     },
   );
 
   it("rejects an unsupported task wake policy", () => {
-    expect(() => defineChannel({ routes: [], taskWakePolicy: "invalid" as never })).toThrow(
-      'taskWakePolicy must be "cohort" or "individual".',
+    expect(() => defineChannel({ routes: [], taskDeliveryPolicy: "invalid" as never })).toThrow(
+      'taskDeliveryPolicy must be "cohort" or "auto".',
     );
   });
 
   it("forwards the eve channel task wake policy to its adapter", () => {
-    const channel = eveChannel({ auth: () => null, taskWakePolicy: "individual" });
-    expect(getAdapter(channel).taskWakePolicy).toBe("individual");
+    const channel = eveChannel({ auth: () => null, taskDeliveryPolicy: "auto" });
+    expect(getAdapter(channel).taskDeliveryPolicy).toBe("auto");
   });
 
   it("preserves the configured turn policy", () => {

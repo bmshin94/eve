@@ -12,6 +12,7 @@ import {
   SessionIdKey,
   SessionKey,
   ScheduleIdKey,
+  TaskDeliveryPolicyKey,
   SessionTitleKey,
 } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -204,6 +205,31 @@ describe("buildRunContext", () => {
 
     expect(ctx.require(AuthKey)).toEqual(testAuth);
     expect(ctx.require(ScheduleIdKey)).toBe("dynamic-tasks");
+  });
+
+  it("inherits schedule provenance but not its delivery policy in child sessions", () => {
+    const scope = new ContextContainer();
+    scope.set(ScheduleIdKey, "automatic-reports");
+    scope.set(TaskDeliveryPolicyKey, "auto");
+    const ctx = contextStorage.run(scope, () =>
+      buildRunContext({
+        bundle: createMinimalBundle(),
+        run: {
+          auth: testAuth,
+          adapter: { kind: "subagent" },
+          input: { message: "Prepare report A" },
+          mode: "task",
+          parent: {
+            callId: "call-1",
+            rootSessionId: "root-session",
+            sessionId: "parent-session",
+            turn: { id: "turn-1", sequence: 0 },
+          },
+        },
+      }),
+    );
+    expect(ctx.require(ScheduleIdKey)).toBe("automatic-reports");
+    expect(ctx.get(TaskDeliveryPolicyKey)).toBeUndefined();
   });
 
   it("stores a title only for top-level sessions", () => {

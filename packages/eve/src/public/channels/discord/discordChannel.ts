@@ -1,7 +1,7 @@
 import type { DiscordInstrumentationMetadata } from "#public/channels/discord/index.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
-import type { SessionAuthContext, TurnPolicy, TaskWakePolicy } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy, TaskDeliveryPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -157,8 +157,8 @@ export interface DiscordChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
-  /** Background task result delivery policy. Defaults to "individual", or "cohort" for schedule-started sessions. */
-  readonly taskWakePolicy?: TaskWakePolicy;
+  /** Background task reporting policy. Defaults to "auto"; schedules use their own policy. */
+  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
 
   /** Inbound command hook. Defaults to user-scoped Discord auth and dispatch. Return `{ auth }` to dispatch, or `null` to acknowledge without running the agent. */
   onCommand?(
@@ -226,7 +226,7 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
   >({
     kindHint: "discord",
     turnPolicy: config.turnPolicy,
-    taskWakePolicy: config.taskWakePolicy,
+    taskDeliveryPolicy: config.taskDeliveryPolicy,
     state: initialDiscordState(),
     metadata: discordInstrumentationMetadata,
     audience: ({ state }) => state.audience ?? "unknown",

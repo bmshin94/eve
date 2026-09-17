@@ -34,7 +34,7 @@ const authenticateRemoteChild: AuthFn<Request> = (request) =>
 const authenticateEvalDriver: AuthFn<Request> = () => principal("eval-driver");
 
 export default eveChannel({
-  taskWakePolicy: "cohort",
+  taskDeliveryPolicy: "cohort",
   auth: [
     authenticateSessionInitiator,
     authenticateLaterParentCaller,

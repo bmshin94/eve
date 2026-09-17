@@ -6,7 +6,7 @@ import type { Session, SessionHandle } from "#channel/session.js";
 import type {
   DeliverPayload,
   SessionAuthContext,
-  TaskWakePolicy,
+  TaskDeliveryPolicy,
   TurnPolicy,
 } from "#channel/types.js";
 import type { StepInput } from "#harness/types.js";
@@ -69,8 +69,8 @@ export interface GenericChannelDefinition<
 > {
   /** Policy used by message sends that do not provide an explicit override. */
   readonly turnPolicy?: TurnPolicy;
-  /** Background task result delivery policy. Defaults to "individual", or "cohort" for schedule-started sessions. */
-  readonly taskWakePolicy?: TaskWakePolicy;
+  /** Background task reporting policy. Defaults to "auto"; schedules use their own policy. */
+  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
   deliver?(payload: DeliverPayload, ctx: TCtx): StepInput | void | Promise<StepInput | void>;
   readonly state?: TState;
   /**

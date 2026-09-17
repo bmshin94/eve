@@ -1,3 +1,4 @@
+import { TASK_DELIVERY_POLICY_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import type { DeliverPayload } from "#channel/types.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
 import type {
@@ -45,9 +46,9 @@ export async function nextTurnDelivery(input: {
       getSessionTaskCohorts(cursor.sessionState.snapshot.session.state),
       {
         deferDeliveries: input.deferDeliveries,
-        wakePolicy:
-          cursor.serializedContext["eve.runtime.taskWakePolicy"] === "individual"
-            ? "individual"
+        taskDeliveryPolicy:
+          cursor.serializedContext[TASK_DELIVERY_POLICY_CONTEXT_KEY_NAME] === "auto"
+            ? "auto"
             : "cohort",
         expectedAttemptIds: input.expectedAttemptIds,
         freshSequence: inbox.hasPending() ? undefined : freshSequence,

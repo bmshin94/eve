@@ -4,7 +4,7 @@ import { attachClientContext, readClientContext } from "#internal/client-context
 import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionHandle } from "#channel/session.js";
-import type { DeliverPayload, TaskWakePolicy } from "#channel/types.js";
+import type { DeliverPayload, TaskDeliveryPolicy } from "#channel/types.js";
 import type {
   FetchFileContext,
   FetchFileResult,
@@ -129,7 +129,7 @@ export type ChannelAdapter<TCtx extends ChannelAdapterContext<any> = ChannelAdap
    * behavior.
    */
   readonly kind: string;
-  readonly taskWakePolicy?: TaskWakePolicy;
+  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
 
   /**
    * Initial state shape. Auto-serialized at step boundaries via JSON

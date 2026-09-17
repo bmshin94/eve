@@ -1,3 +1,4 @@
+import type { TaskDeliveryPolicy } from "#channel/types.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { CompiledChannel } from "#channel/compiled-channel.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
@@ -86,6 +87,7 @@ export type ResolvedSkillDefinition = Readonly<
 export type ResolvedScheduleDefinition = Readonly<
   SourceRef & {
     readonly cron: string;
+    readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
     readonly name: string;
     readonly markdown?: string;
     readonly hasRun: boolean;

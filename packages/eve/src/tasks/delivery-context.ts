@@ -1,4 +1,4 @@
-import type { TaskWakePolicy, DeliverHookPayload } from "#channel/types.js";
+import type { TaskDeliveryPolicy, DeliverHookPayload } from "#channel/types.js";
 import { markFrameworkStepInput } from "#harness/messages.js";
 import type { SessionStateMap, StepInput } from "#harness/types.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
@@ -12,7 +12,9 @@ The latest ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists 
 
 Continue carrying out the user's request, including starting any remaining background work. When no further tool calls are needed in this turn, send one brief user-facing acknowledgement that the background work has started. Do not wait for results or report results that are not available yet. End the turn after the acknowledgement.`;
 
-export const TASK_DELIVERY_SETTLED_INSTRUCTION = `Background task reporting\nThis turn was triggered by background task activity. The accompanying ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists the background tasks whose results are being delivered in this turn, all settled, with every available terminal output. Other background tasks may still be running. Report these results without waiting for them or repeating previously reported results. Do not reply with ${EMPTY_DELIVERY_SENTINEL}. Send one user-facing response that combines their useful results.`;
+export const TASK_DELIVERY_SETTLED_INSTRUCTION = `Background task reporting\nFor this background-task update, the accompanying ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists the settled tasks in this cohort and their available terminal outputs. Report their useful results together in one user-facing response without repeating results already reported. Do not reply with ${EMPTY_DELIVERY_SENTINEL}.`;
+
+export const TASK_DELIVERY_AUTO_INSTRUCTION = `Background task reporting\nFor this background-task update, the accompanying ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists the whole cohort, including pending tasks and every available terminal output. A received result has not necessarily been reported to the user. Report new results only when they are useful on their own, without depending on unfinished tasks. If a useful answer needs unfinished work, keep the results for a later combined report and reply with exactly ${EMPTY_DELIVERY_SENTINEL}. When that work settles, combine its results with any previously withheld results. If there is nothing new and useful to report, reply with exactly ${EMPTY_DELIVERY_SENTINEL}. Do not repeat results already reported or send an acknowledgement just to say you are waiting.`;
 
 type BackgroundTaskDelivery = DeliverHookPayload & {
   readonly taskDeliveryId: string;
@@ -38,7 +40,7 @@ export function markBackgroundTaskStepInput(input: StepInput): StepInput {
 export function resolveTaskDeliveryContext(input: {
   readonly state: SessionStateMap | undefined;
   readonly taskDeliveryIds: readonly string[];
-  readonly wakePolicy: TaskWakePolicy;
+  readonly taskDeliveryPolicy: TaskDeliveryPolicy;
 }):
   | {
       readonly context: string;
@@ -52,12 +54,11 @@ export function resolveTaskDeliveryContext(input: {
   const delivered = entries.find((entry) => firstDeliveryId.startsWith(`${entry.taskId}:`));
   if (delivered === undefined) return undefined;
 
-  const cohort = entries.filter((entry) =>
-    input.wakePolicy === "individual"
-      ? input.taskDeliveryIds.some((id) => id.startsWith(`${entry.taskId}:`))
-      : getTaskCohortId(entry) === getTaskCohortId(delivered),
-  );
-  return { ...projectTaskCohort(cohort), rootTurnId: delivered.createdByTurnId };
+  const cohort = entries.filter((entry) => getTaskCohortId(entry) === getTaskCohortId(delivered));
+  return {
+    ...projectTaskCohort(cohort, input.taskDeliveryPolicy === "auto"),
+    rootTurnId: delivered.createdByTurnId,
+  };
 }
 
 /** Returns model context for durable tasks launched by the active parent turn. */
@@ -71,17 +72,20 @@ export function resolveInitiatingTaskContext(input: {
   if (!cohort.some((entry) => entry.executor !== undefined && entry.terminalView === undefined)) {
     return undefined;
   }
-  return { ...projectTaskCohort(cohort), phase: "initiating" };
+  return { ...projectTaskCohort(cohort, false), phase: "initiating" };
 }
 
-function projectTaskCohort(cohort: readonly SessionTaskIndexEntry[]): {
+function projectTaskCohort(
+  cohort: readonly SessionTaskIndexEntry[],
+  includePartialOutputs: boolean,
+): {
   readonly context: string;
   readonly phase: "pending" | "settled";
 } {
   const settled = cohort.every((entry) => entry.terminalView !== undefined);
   const tasks = cohort.map((entry) => ({
     name: entry.metadata.name,
-    output: settled ? entry.terminalView?.lastOutput : undefined,
+    output: settled || includePartialOutputs ? entry.terminalView?.lastOutput : undefined,
     status: entry.terminalView?.status ?? "pending",
     taskId: entry.taskId,
   }));

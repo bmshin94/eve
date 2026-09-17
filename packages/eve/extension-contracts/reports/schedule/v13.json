@@ -1,0 +1,14 @@
+{
+  "kind": "eve-extension-capability-contract",
+  "capability": "schedule",
+  "epoch": 13,
+  "sha256": "4c00b61918f7f3389665731fbad76822cd56d9569bcb2767d07fe4b877df5a65",
+  "exports": [
+    "ScheduleDefinition",
+    "ScheduleHandlerArgs",
+    "ScheduleRunHandler",
+    "ScheduleToFn",
+    "TypedReceiveTarget",
+    "defineSchedule"
+  ]
+}

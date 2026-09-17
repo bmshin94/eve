@@ -71,7 +71,7 @@ describe("createRuntimeAdapterRegistry", () => {
       expect(rehydrated).toEqual({
         kind: SCHEDULE_ADAPTER_KIND,
         state: {},
-        taskWakePolicy: "cohort",
+        taskDeliveryPolicy: "cohort",
       });
     });
 
@@ -116,7 +116,7 @@ describe("createRuntimeAdapterRegistry", () => {
     it("rejects a policy on the reserved HTTP adapter instead of discarding it", () => {
       expect(() =>
         createRuntimeAdapterRegistry({
-          channels: [makeChannelDefinition({ kind: "http", taskWakePolicy: "individual" })],
+          channels: [makeChannelDefinition({ kind: "http", taskDeliveryPolicy: "auto" })],
         }),
       ).toThrow(RuntimeRegistryError);
     });

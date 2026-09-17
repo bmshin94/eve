@@ -386,7 +386,11 @@ describe("compileAgentManifest source graph", () => {
       {
         logicalPath: "schedules/prompt.ts",
         loadNamespace: async () => ({
-          default: defineSchedule({ cron: "0 9 * * *", markdown: "Run the prompt." }),
+          default: defineSchedule({
+            cron: "0 9 * * *",
+            markdown: "Run the prompt.",
+            taskDeliveryPolicy: "auto",
+          }),
         }),
       },
       {
@@ -450,6 +454,9 @@ describe("compileAgentManifest source graph", () => {
     const compiled = await compileAgentManifest(manifest(), {
       sourceRegistries: [sourceRegistry],
     });
+    expect(compiled.schedules).toContainEqual(
+      expect.objectContaining({ logicalPath: "schedules/prompt.ts", taskDeliveryPolicy: "auto" }),
+    );
     const usageByLogicalPath = Object.fromEntries(
       Object.values(compiled.bindings).map((binding) => [binding.logicalPath, binding.usage]),
     );

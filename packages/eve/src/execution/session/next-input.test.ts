@@ -518,18 +518,18 @@ describe("buffered task completion batching", () => {
   beforeEach(() => vi.mocked(routeDeliverToChildren).mockReset());
   afterEach(() => vi.mocked(routeDeliverToChildren).mockReset());
 
-  it("individual wakes for a completion while its cross-turn sibling remains unfinished", async () => {
+  it("auto wakes for a completion while its cross-turn sibling remains unfinished", async () => {
     const input = batchingInput(2, true);
-    await input.cursor.apply({ serializedContext: { "eve.runtime.taskWakePolicy": "individual" } });
+    await input.cursor.apply({ serializedContext: { "eve.runtime.taskDeliveryPolicy": "auto" } });
     const first = completion("task_0");
     input.queue.enqueueDelivery(first);
     await expect(nextTurnDelivery(input)).resolves.toMatchObject({ kind: "turn", delivery: first });
     expect(input.queue.pendingCount).toBe(0);
   });
 
-  it("individual combines ready siblings without waiting for the remaining task", async () => {
+  it("auto combines ready siblings without waiting for the remaining task", async () => {
     const input = batchingInput(3);
-    await input.cursor.apply({ serializedContext: { "eve.runtime.taskWakePolicy": "individual" } });
+    await input.cursor.apply({ serializedContext: { "eve.runtime.taskDeliveryPolicy": "auto" } });
     const first = completion("task_0");
     const second = completion("task_1");
     input.queue.enqueueDelivery(first);
@@ -547,9 +547,9 @@ describe("buffered task completion batching", () => {
     expect(input.queue.pendingCount).toBe(0);
   });
 
-  it("individual preserves intervening user input and deferred delivery boundaries", async () => {
+  it("auto preserves intervening user input and deferred delivery boundaries", async () => {
     const input = batchingInput(3);
-    await input.cursor.apply({ serializedContext: { "eve.runtime.taskWakePolicy": "individual" } });
+    await input.cursor.apply({ serializedContext: { "eve.runtime.taskDeliveryPolicy": "auto" } });
     const question = {
       kind: "deliver",
       payloads: [{ message: "Alice checks the status." }],
@@ -564,7 +564,7 @@ describe("buffered task completion batching", () => {
       delivery: question,
     });
     expect(
-      input.queue.takeNext(new Map(), { wakePolicy: "individual", deferDeliveries: true }),
+      input.queue.takeNext(new Map(), { taskDeliveryPolicy: "auto", deferDeliveries: true }),
     ).toBeUndefined();
     expect(input.queue.pendingCount).toBe(2);
     await expect(nextTurnDelivery(input)).resolves.toMatchObject({

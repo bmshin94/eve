@@ -1,3 +1,3 @@
 import { resultDeliveryEval } from "./helpers/result-delivery";
 
-export default resultDeliveryEval();
+export default resultDeliveryEval({ dependent: true });

@@ -700,6 +700,7 @@ const compiledSkillSourceSchema: z.ZodType<CompiledSkillDefinition> = z.discrimi
 
 const compiledScheduleBaseFields = {
   cron: z.string(),
+  taskDeliveryPolicy: z.enum(["auto", "cohort"]).optional(),
   hasRun: z.boolean(),
   name: z.string(),
   logicalPath: z.string(),

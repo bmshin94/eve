@@ -9,8 +9,9 @@ import {
   SCHEDULE_APP_AUTH,
   ScheduleDispatcher,
 } from "#channel/schedule.js";
+import { buildRunContext } from "#execution/runtime-context.js";
 import { contextStorage } from "#context/container.js";
-import { ScheduleIdKey } from "#context/keys.js";
+import { ScheduleIdKey, TaskDeliveryPolicyKey } from "#context/keys.js";
 import type { RunHandle, Runtime } from "#channel/types.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
@@ -33,11 +34,11 @@ function createMockRuntime(): Runtime {
   };
 }
 
-function makeSlackChannelEntry(): {
+function makeSlackChannelEntry(taskDeliveryPolicy?: "auto" | "cohort"): {
   definition: CompiledChannel;
   resolved: ResolvedChannelDefinition;
 } {
-  const channel = slackChannel();
+  const channel = slackChannel({ taskDeliveryPolicy });
   if (!isCompiledChannel(channel)) {
     throw new Error("expected a compiled slack channel for this test");
   }
@@ -59,6 +60,62 @@ function makeSlackChannelEntry(): {
 }
 
 describe("ScheduleDispatcher", () => {
+  it.each([
+    [undefined, "auto", "cohort"],
+    ["auto", "cohort", "auto"],
+    ["cohort", "auto", "cohort"],
+  ] as const)(
+    "carries schedule policy %s through channel policy %s as %s",
+    async (taskDeliveryPolicy, channelPolicy, expected) => {
+      vi.stubEnv("SLACK_BOT_TOKEN", "xoxb-test");
+      vi.stubEnv("SLACK_SIGNING_SECRET", "test-secret");
+      try {
+        const runtime = createMockRuntime();
+        const policies: unknown[] = [];
+        runtime.createSession = vi.fn(async (run) => {
+          policies.push(buildRunContext({ bundle: {} as never, run }).get(TaskDeliveryPolicyKey));
+          return createMockRunHandle();
+        });
+        const { definition, resolved } = makeSlackChannelEntry(channelPolicy);
+        const dispatcher = new ScheduleDispatcher({ runtime, channels: [resolved] });
+        const result = await dispatcher.trigger({
+          scheduleId: "daily-report",
+          taskDeliveryPolicy,
+          run({ to, waitUntil, appAuth }) {
+            waitUntil(
+              Promise.resolve().then(() =>
+                to(definition, { channelId: "C0123ABC" }).send("Report", { auth: appAuth }),
+              ),
+            );
+          },
+        });
+        await Promise.all(result.waitUntilTasks);
+        expect(policies).toEqual([expected]);
+        expect(contextStorage.getStore()?.get(TaskDeliveryPolicyKey)).toBeUndefined();
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    },
+  );
+
+  it.each([undefined, "auto", "cohort"] as const)(
+    "carries markdown schedule policy %s into task mode",
+    async (taskDeliveryPolicy) => {
+      const runtime = createMockRuntime();
+      runtime.createSession = vi.fn(async (run) => {
+        const ctx = buildRunContext({ bundle: {} as never, run });
+        expect(ctx.get(TaskDeliveryPolicyKey)).toBe(taskDeliveryPolicy ?? "cohort");
+        return createMockRunHandle();
+      });
+      await new ScheduleDispatcher({ runtime, channels: [] }).trigger({
+        scheduleId: "report",
+        markdown: "Report",
+        taskDeliveryPolicy,
+      });
+      expect(runtime.createSession).toHaveBeenCalledOnce();
+    },
+  );
+
   describe("markdown form", () => {
     it("starts a Session via runtime.createSession with the SCHEDULE_ADAPTER", async () => {
       const runtime = createMockRuntime();

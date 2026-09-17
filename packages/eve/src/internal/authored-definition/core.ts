@@ -485,7 +485,7 @@ function normalizeSkillFiles(
  */
 export function normalizeScheduleDefinition(value: unknown, message: string): ScheduleDefinition {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["cron", "markdown", "run"], message);
+  expectOnlyKnownKeys(record, ["cron", "markdown", "run", "taskDeliveryPolicy"], message);
 
   const cron = expectString(record.cron, message);
   const hasMarkdown = record.markdown !== undefined;
@@ -502,7 +502,21 @@ export function normalizeScheduleDefinition(value: unknown, message: string): Sc
     );
   }
 
-  const definition: { cron: string; markdown?: string; run?: ScheduleRunHandler } = { cron };
+  const taskDeliveryPolicy = record.taskDeliveryPolicy;
+  if (
+    taskDeliveryPolicy !== undefined &&
+    taskDeliveryPolicy !== "auto" &&
+    taskDeliveryPolicy !== "cohort"
+  ) {
+    throw new Error(`${message} taskDeliveryPolicy must be "auto" or "cohort".`);
+  }
+  const definition: {
+    cron: string;
+    markdown?: string;
+    run?: ScheduleRunHandler;
+    taskDeliveryPolicy?: "auto" | "cohort";
+  } = { cron };
+  if (taskDeliveryPolicy !== undefined) definition.taskDeliveryPolicy = taskDeliveryPolicy;
 
   if (hasMarkdown) {
     definition.markdown = expectString(record.markdown, message);

@@ -4,10 +4,10 @@ status: implemented
 last_updated: "2026-09-17"
 ---
 
-# Configurable background task wakes
+# Background task delivery policy
 
-The channel chooses whether successful task results wait for unfinished
-siblings; task execution and terminality remain independent of that choice.
+Channels and schedules choose when background results are reported; task execution
+and session completion remain independent of that choice.
 
 ## Authoring
 
@@ -15,52 +15,41 @@ siblings; task execution and terminality remain independent of that choice.
 import { eveChannel } from "eve/channels/eve";
 import { localDev } from "eve/channels/auth";
 
-export default eveChannel({
-  auth: localDev(),
-  taskWakePolicy: "individual",
-});
+export default eveChannel({ auth: localDev(), taskDeliveryPolicy: "auto" });
 ```
 
-`taskWakePolicy` accepts `"cohort"` or `"individual"` on `defineChannel`
-and its built-in wrappers. It controls background results for sessions started
-on that channel. Agent definitions do not carry this setting: the same agent can
-have different wake policies on different channels. Child sessions use their own
-channel policy. Ordinary channel sessions default to `"individual"`; schedule-started
-sessions default to `"cohort"`, including handler schedules that target another
-channel. An explicit channel setting wins over either default. Internal subagent
-sessions retain `"cohort"`.
+`taskDeliveryPolicy: "auto" | "cohort"` is available on channel definitions and
+schedule definitions, including Markdown schedule frontmatter. Channels default
+to `"auto"`; schedules default to `"cohort"`. A schedule's resolved policy wins over
+the channel used to start its sessions. Internal subagent sessions use `"cohort"`.
 
 ## Observable behavior
 
 A cohort contains overlapping tasks, including launches in later user turns.
-The existing cohort policy holds successful completions until the cohort settles.
-Individual policy makes each successful completion eligible without waiting for
-unfinished siblings. Results from the same cohort already queued when the parent
-becomes available may share a turn. It does not promise one turn per completion.
+`"cohort"` holds successful completions until that cohort settles, then reports
+the results together. `"auto"` allows each ready completion to invoke the parent;
+results already queued from the same cohort may share a turn.
 
-For tasks A and B, releasing A while B remains gated produces a report for A under
-individual policy. Releasing B later produces a report for B, with only B's output in
-the new reporting context. Cohort policy continues to produce one report after
-both are terminal. User input and intervention notifications retain their existing
-ordering and remain serviceable with unfinished background work.
+For independent tasks A and B, auto can report A while B runs. When A needs B to
+produce a useful answer, the parent may stay silent after A and report both after
+B settles. This is a model judgment about delivery, not a way to avoid the model
+call. The runtime retains available outputs in the task index and includes the
+whole cohort in subsequent reporting contexts. Received does not mean reported.
+User input and intervention notifications remain serviceable under either policy.
 
 ## Runtime boundaries
 
-The channel definition validates the wake policy and carries it on its adapter.
-Policy-only channels keep a distinct adapter identity for rehydration. Each model
-step resolves the channel override or schedule-dependent default and records it
-in durable context so the workflow input queue can decide eligibility without
-running the parent model. The queue preserves all
-notification identities when it combines ready results; routing may strip task
-payloads after caching their terminal views, so reporting uses those identities
-to select the delivered results. The parent activity root remains tied to the
-first delivered task's creating turn.
+The channel adapter carries authored configuration. Schedule dispatch scopes its
+resolved policy alongside schedule provenance; root session creation copies that
+value into the same durable runtime policy slot used by ordinary channel sessions.
+The workflow queue reads this slot without loading channel modules. Channel
+configuration supplies the value when a session has no schedule override.
 
-Scheduled task-mode sessions check their durable task index as well as newly
-launched tasks before finishing. Reporting one individual completion cannot
-finish the session or cancel unfinished siblings. Task ownership, terminal-state
-persistence, cancellation, and duplicate suppression retain their existing rules.
-Regression coverage checks partial and buffered completions, cross-turn siblings,
-input ordering, reporting context, schedule defaults and overrides, task-mode
-completion, and configuration propagation. A deterministic fixture eval gates two
-children independently to check the default individual-policy behavior.
+Reporting projects cohort state from the existing task index. Auto exposes
+available outputs while the cohort is pending and permits an empty delivery.
+Cohort reports wait for settlement and require a response. Child calls and
+structured outputs retain their explicit output contracts.
+
+Scheduled task-mode sessions check indexed pending tasks as well as newly launched
+tasks before finishing. A partial report cannot end the session and cancel siblings.
+No separate store of reported or withheld task outputs is introduced.

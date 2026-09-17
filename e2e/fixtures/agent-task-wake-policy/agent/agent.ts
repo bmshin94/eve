@@ -14,7 +14,8 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     return `REPORT:${marker}`;
   }
   const last =
-    [...request.userMessages]
+    request.messages
+      .map((message) => message.text)
       .reverse()
       .find(
         (message) =>
@@ -36,19 +37,34 @@ function respond(request: MockModelRequest): MockModelResponse | string {
       })),
     };
   }
-  const stateMessage = [...request.userMessages]
+  const stateMessage = request.messages
+    .map((message) => message.text)
     .reverse()
     .find((message) => message.startsWith("[Task state]\n"));
   const state =
     stateMessage === undefined
       ? undefined
       : (JSON.parse(stateMessage.slice("[Task state]\n".length)) as {
-          tasks: { output?: { type: string; data: unknown } }[];
+          tasks: { status: string; output?: { type: string; data: unknown } }[];
         });
   const results =
     state?.tasks.flatMap((task) => (task.output?.type === "result" ? [task.output.data] : [])) ??
     [];
-  return results.length > 0 ? JSON.stringify(results.sort()) : "REPORTS:STARTED";
+  const dependent = request.userMessages.some((message) => message.includes("joint comparison"));
+  if (dependent && results.length > 0 && state?.tasks.some((task) => task.status === "pending")) {
+    return "<eve-empty-delivery/>";
+  }
+  const reported = new Set(
+    request.messages.flatMap((message) =>
+      message.role === "assistant" && message.text.startsWith('["REPORT:')
+        ? (JSON.parse(message.text) as string[])
+        : [],
+    ),
+  );
+  const unreported = results.filter(
+    (result) => typeof result === "string" && !reported.has(result),
+  );
+  return unreported.length > 0 ? JSON.stringify(unreported.sort()) : "REPORTS:STARTED";
 }
 
 const base = e2eAgentConfig({ mock: respond });

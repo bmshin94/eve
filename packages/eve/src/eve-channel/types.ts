@@ -1,6 +1,6 @@
 import type { UserContent } from "ai";
 
-import type { SessionAuthContext, TurnPolicy, TaskWakePolicy } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy, TaskDeliveryPolicy } from "#channel/types.js";
 import type { TrustedForwarders } from "#channel/forwarded-principal.js";
 import type { AuthFn } from "#public/channels/auth.js";
 import type { UploadPolicyInput } from "#public/channels/upload-policy.js";
@@ -144,8 +144,8 @@ export interface EveChannelInput {
   readonly cors?: EveChannelCors;
   /** Policy for follow-up messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
-  /** Background task result delivery policy. Defaults to "individual", or "cohort" for schedule-started sessions. */
-  readonly taskWakePolicy?: TaskWakePolicy;
+  /** Background task reporting policy. Defaults to "auto"; schedules use their own policy. */
+  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
   /**
    * Pre-dispatch hook for inbound eve HTTP messages. Runs after route auth and body
    * parsing, before runtime dispatch.

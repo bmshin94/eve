@@ -9,7 +9,7 @@ import {
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { ChannelContinuationOps, TaskWakePolicy } from "#public/definitions/channel.js";
+import type { ChannelContinuationOps, TaskDeliveryPolicy } from "#public/definitions/channel.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -189,8 +189,8 @@ export interface TelegramChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
-  /** Background task result delivery policy. Defaults to "individual", or "cohort" for schedule-started sessions. */
-  readonly taskWakePolicy?: TaskWakePolicy;
+  /** Background task reporting policy. Defaults to "auto"; schedules use their own policy. */
+  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
   /** Inbound upload policy for Telegram photos and documents. */
   readonly uploadPolicy?: UploadPolicyInput;
 }
@@ -249,7 +249,7 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
   >({
     kindHint: "telegram",
     turnPolicy: config.turnPolicy,
-    taskWakePolicy: config.taskWakePolicy,
+    taskDeliveryPolicy: config.taskDeliveryPolicy,
     state: initialTelegramState(config.botUsername),
     ...telegramInstrumentation,
     fetchFile: createTelegramFetchFile({

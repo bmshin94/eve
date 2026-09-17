@@ -9,26 +9,25 @@ eve supports two ways to delegate work: the root-only built-in `agent` tool, whi
 
 Overlapping background work owned by a session forms a cohort. Tasks launched in
 later user turns join the open cohort while earlier work is still pending or its
-successful results await delivery. With `taskWakePolicy: "cohort"`, eve holds successful completion notifications
+successful results await delivery. With `taskDeliveryPolicy: "cohort"`, eve holds successful completion notifications
 until every task in that cohort has completed, failed, or been cancelled, then
 delivers the successful results together in one parent turn. Partial completions
 do not invoke the parent model. Work started after the cohort settles forms a new
 cohort.
 
-Channel sessions default to `"individual"`; sessions started by schedules default
-to `"cohort"`. An explicit `taskWakePolicy` on the channel overrides either default. See
-[Background task results](/docs/channels/overview#background-task-results) for a
-channel configuration example.
+Channel sessions default to `taskDeliveryPolicy: "auto"`; schedules default to
+`"cohort"` and can override the policy on their own definition. See
+[Background task results](/docs/channels/overview#background-task-results).
 
-With `"individual"`, a successful result can start a parent turn while other tasks
-are still running. Results from the same cohort already queued when the parent
-becomes available may share a turn; this setting does not guarantee one turn per
-task. The reporting context includes the results delivered in that turn, without
-including earlier results again. Tasks continue to run independently.
+With `"auto"`, a successful result can start a parent turn while other tasks are
+still running. The parent reports independently useful results and stays silent
+when a useful answer depends on unfinished tasks. Ready results may share a turn.
+The reporting context includes the whole cohort and every available output,
+including previously withheld results, for a later combined report.
 
-The setting applies to background work owned by sessions on that channel,
-including background tools and built-in, declared, and remote subagents. Child
-sessions use their own channel's policy for the work they start.
+The setting applies to background tools and built-in, declared, and remote
+subagents owned by the session. Internal subagent sessions use `"cohort"` for
+background work they start.
 
 User messages, input requests, authorization events, failures, and cancellation
 are handled without waiting for the cohort. Child lifecycle events are processed

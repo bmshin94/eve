@@ -21,7 +21,7 @@ import {
   SessionDynamicToolRuntimeRevisionKey,
   StaticModelReferenceKey,
   TurnTaskDeliveryKey,
-  TaskWakePolicyKey,
+  TaskDeliveryPolicyKey,
   TurnDeliveryIdsKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -117,9 +117,11 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-  const taskWakePolicy =
-    adapter.taskWakePolicy ?? (ctx.has(ScheduleIdKey) ? "cohort" : "individual");
-  ctx.set(TaskWakePolicyKey, taskWakePolicy);
+  const taskDeliveryPolicy =
+    ctx.get(TaskDeliveryPolicyKey) ??
+    adapter.taskDeliveryPolicy ??
+    (ctx.has(ScheduleIdKey) ? "cohort" : "auto");
+  ctx.set(TaskDeliveryPolicyKey, taskDeliveryPolicy);
 
   // Populate the callback base URL so getHookUrl() works during tool
   // execution, preferring eve's active local origin over metadata fallback.
@@ -288,7 +290,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
         taskDeliveryIds: backgroundTaskDelivery.taskDeliveryIds ?? [
           backgroundTaskDelivery.taskDeliveryId,
         ],
-        wakePolicy: taskWakePolicy,
+        taskDeliveryPolicy,
       });
       if (taskContext !== undefined) {
         ctx.set(TurnTaskDeliveryKey, taskContext.phase);

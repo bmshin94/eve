@@ -1,5 +1,5 @@
 import type { SessionHandle } from "#channel/session.js";
-import type { SessionAuthContext, TurnPolicy, TaskWakePolicy } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy, TaskDeliveryPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
@@ -171,8 +171,8 @@ export interface GitHubChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
-  /** Background task result delivery policy. Defaults to "individual", or "cohort" for schedule-started sessions. */
-  readonly taskWakePolicy?: TaskWakePolicy;
+  /** Background task reporting policy. Defaults to "auto"; schedules use their own policy. */
+  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
 
   /**
    * Invoked for every `@mention` of the bot in an issue/PR timeline comment or
@@ -251,7 +251,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
   const channel = defineChannel<GitHubChannelState, GitHubChannelContext, GitHubReceiveTarget>({
     kindHint: "github",
     turnPolicy: config.turnPolicy,
-    taskWakePolicy: config.taskWakePolicy,
+    taskDeliveryPolicy: config.taskDeliveryPolicy,
     state: initialGitHubState(),
 
     context(state, session) {

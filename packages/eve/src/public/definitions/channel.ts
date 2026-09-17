@@ -37,7 +37,7 @@ export type {
   ResetSessionResult,
   SessionCallback,
   TurnPolicy,
-  TaskWakePolicy,
+  TaskDeliveryPolicy,
 } from "#channel/types.js";
 export type { Session, SessionHandle } from "#channel/session.js";
 export type { ChannelAudience } from "#shared/channel-audience.js";
@@ -288,11 +288,11 @@ export function defineChannel<
   definition: ChannelDefinition<TState, TCtx, TReceiveTarget, TMetadata>,
 ): Channel<TState, TReceiveTarget, TMetadata> {
   if (
-    definition.taskWakePolicy !== undefined &&
-    definition.taskWakePolicy !== "cohort" &&
-    definition.taskWakePolicy !== "individual"
+    definition.taskDeliveryPolicy !== undefined &&
+    definition.taskDeliveryPolicy !== "cohort" &&
+    definition.taskDeliveryPolicy !== "auto"
   ) {
-    throw new Error('taskWakePolicy must be "cohort" or "individual".');
+    throw new Error('taskDeliveryPolicy must be "cohort" or "auto".');
   }
   const adapter = buildAdapter(definition);
   const cors = normalizeChannelCors(definition.cors);
@@ -348,7 +348,7 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
   const hasMetadata = metadata !== undefined;
   const audience = definition.audience;
   const hasBehavior =
-    hasState || hasContext || hasMetadata || definition.taskWakePolicy !== undefined;
+    hasState || hasContext || hasMetadata || definition.taskDeliveryPolicy !== undefined;
 
   const eventHandlers: Record<string, unknown> = {};
   let hasEventHandlers = false;
@@ -401,7 +401,7 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
   }
 
   const adapter: ChannelAdapter<any> = {
-    taskWakePolicy: definition.taskWakePolicy,
+    taskDeliveryPolicy: definition.taskDeliveryPolicy,
     kind: definition.kindHint ?? "defineChannel",
     state: hasState ? { ...(definition.state as Record<string, unknown>) } : {},
     fetchFile: definition.fetchFile,

@@ -358,6 +358,18 @@ describe("normalizeAgentDefinition", () => {
 });
 
 describe("normalizeScheduleDefinition", () => {
+  it.each(["auto", "cohort"])("preserves schedule delivery policy %s", (taskDeliveryPolicy) => {
+    const definition = { cron: "0 9 * * *", markdown: "Report", taskDeliveryPolicy };
+    expect(normalizeScheduleDefinition(definition, "Invalid schedule.")).toEqual(definition);
+  });
+  it("rejects an unsupported schedule delivery policy", () => {
+    expect(() =>
+      normalizeScheduleDefinition(
+        { cron: "0 9 * * *", markdown: "Report", taskDeliveryPolicy: "individual" },
+        "Invalid schedule.",
+      ),
+    ).toThrow('taskDeliveryPolicy must be "auto" or "cohort"');
+  });
   it.each(["approval", "needsApproval"])("rejects the removed %s field", (field) => {
     expect(() =>
       normalizeScheduleDefinition(

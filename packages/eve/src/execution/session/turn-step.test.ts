@@ -2536,21 +2536,24 @@ describe("turnStep", () => {
   });
 
   it.each([
-    [undefined, false, "individual"],
-    [undefined, true, "cohort"],
-    ["cohort", false, "cohort"],
-    ["cohort", true, "cohort"],
-    ["individual", false, "individual"],
-    ["individual", true, "individual"],
+    [undefined, undefined, "auto"],
+    ["cohort", undefined, "cohort"],
+    ["auto", undefined, "auto"],
+    [undefined, "cohort", "cohort"],
+    ["auto", "cohort", "cohort"],
+    ["cohort", "cohort", "cohort"],
+    [undefined, "auto", "auto"],
+    ["auto", "auto", "auto"],
+    ["cohort", "auto", "auto"],
   ] as const)(
-    "resolves channel policy %s with schedule provenance %s to %s",
-    async (wakePolicy, scheduled, expected) => {
+    "resolves channel policy %s with schedule policy %s to %s",
+    async (taskDeliveryPolicy, schedulePolicy, expected) => {
       const bundle = createStubBundle();
       vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
         ...bundle,
         adapterRegistry: {
           adaptersByKind: new Map([
-            [threadContextAdapter.kind, { ...threadContextAdapter, taskWakePolicy: wakePolicy }],
+            [threadContextAdapter.kind, { ...threadContextAdapter, taskDeliveryPolicy }],
           ]),
         },
       } as typeof bundle);
@@ -2588,7 +2591,10 @@ describe("turnStep", () => {
         return { next: { done: true, output: "ok" }, session };
       });
       const serializedContext = createSerializedContext();
-      if (scheduled) serializedContext[ScheduleIdKey.name] = "daily-report";
+      if (schedulePolicy !== undefined) {
+        serializedContext[ScheduleIdKey.name] = "daily-report";
+        serializedContext["eve.runtime.taskDeliveryPolicy"] = schedulePolicy;
+      }
       const result = await turnStep({
         input: {
           kind: "deliver",
@@ -2599,8 +2605,8 @@ describe("turnStep", () => {
         serializedContext,
         sessionState: createStubSessionState(),
       });
-      expect(result.serializedContext["eve.runtime.taskWakePolicy"]).toBe(expected);
-      expect(phases).toEqual([expected === "individual" ? "settled" : "pending"]);
+      expect(result.serializedContext["eve.runtime.taskDeliveryPolicy"]).toBe(expected);
+      expect(phases).toEqual(["pending"]);
     },
   );
 

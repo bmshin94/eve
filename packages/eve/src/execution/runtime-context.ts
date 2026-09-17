@@ -17,6 +17,7 @@ import {
   ParentTraceContextKey,
   ActivityObserverKey,
   ScheduleIdKey,
+  TaskDeliveryPolicyKey,
   SessionCallbackKey,
   SessionTitleKey,
 } from "#context/keys.js";
@@ -85,6 +86,12 @@ export function buildRunContext(input: {
   const scheduleId = contextStorage.getStore()?.get(ScheduleIdKey);
   if (scheduleId !== undefined) {
     ctx.set(ScheduleIdKey, scheduleId);
+    if (run.parent === undefined) {
+      ctx.set(
+        TaskDeliveryPolicyKey,
+        contextStorage.getStore()?.get(TaskDeliveryPolicyKey) ?? "cohort",
+      );
+    }
   }
 
   if (run.delivery !== undefined) {
