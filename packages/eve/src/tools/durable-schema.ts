@@ -53,6 +53,8 @@ export function defineDurableSchema<
       },
     },
   };
+  // Authored tools may compose library-native schemas before eve normalizes them.
+  Object.setPrototypeOf(schema, source);
   Object.defineProperty(schema, DURABLE_SCHEMA, {
     value: {
       callback: (closure: JsonObject) => input.schema(closure as TClosure),
