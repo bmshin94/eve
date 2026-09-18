@@ -443,6 +443,64 @@ describe("EveAgentStore prewarming", () => {
     expect(store.snapshot.session?.streamIndex).toBe(6);
   });
 
+  it("projects a background turn that arrives while another message is being accepted", async () => {
+    const live = controlledStreamResponse();
+    const accepted = Promise.withResolvers<Response>();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(live.response)
+      .mockReturnValueOnce(accepted.promise);
+    const store = createStore({
+      initialSession: { sessionId: "session_1", streamIndex: 0 },
+      reducer: defaultMessageReducer(),
+    });
+    const sending = store.send({ message: "Next question" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    const background = stampTestEvents([
+      createTurnStartedEvent({ sequence: 0, turnId: "turn_background" }),
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "Background result",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_background",
+      }),
+      createSessionWaitingEvent(),
+    ]).map((event) => ({
+      ...event,
+      meta: { ...event.meta, deliveryIds: ["background-delivery"] },
+    }));
+    for (const event of background) live.emit(event);
+    await vi.waitFor(() => expect(store.snapshot.events).toHaveLength(3));
+    expect(store.snapshot.data.messages.some((message) => message.metadata?.optimistic)).toBe(true);
+
+    accepted.resolve(startedResponse("message-delivery"));
+    const messageTurn = turnEvents().map((event) => ({
+      ...event,
+      meta: {
+        ...event.meta,
+        deliveryIds: ["message-delivery"],
+        id: `message-${event.meta.id}`,
+      },
+    }));
+    for (const event of messageTurn) live.emit(event);
+    await vi.waitFor(() => expect(store.snapshot.events).toHaveLength(6));
+    await sending;
+
+    expect(store.snapshot.events).toEqual([...background, ...messageTurn]);
+    expect(store.snapshot.data.messages.some((message) => message.metadata?.optimistic)).toBe(
+      false,
+    );
+    expect(store.snapshot.data.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: "user" }),
+        expect.objectContaining({ role: "assistant" }),
+      ]),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("honors a send's disabled reconnect policy on an existing prewarmed stream", async () => {
     const live = controlledStreamResponse();
     const fetchMock = vi
@@ -755,7 +813,9 @@ describe("EveAgentStore session resume", () => {
           turnId: "turn_0",
         }),
         createSessionWaitingEvent(),
-      ]);
+      ]).map((event, index) =>
+        index < 2 ? event : { ...event, meta: { ...event.meta, deliveryIds: ["delivery_1"] } },
+      );
       const live = controlledStreamResponse();
       live.response.headers.set("x-eve-stream-tail-index", "1");
       live.emit(events[0]!);
