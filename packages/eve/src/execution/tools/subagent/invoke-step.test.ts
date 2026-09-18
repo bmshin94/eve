@@ -7,6 +7,8 @@ import {
   settleTaskAgentInvocationStep,
 } from "#execution/tools/subagent/invoke-step.js";
 import { dispatchToClaimedAgentAddress } from "#subagents/handle-dispatch.js";
+import { createAgentContinuationBundle } from "#subagents/continuation-bundle.js";
+import { AgentHandleError } from "#protocol/agent-handle-error.js";
 import { startSubagent } from "#execution/tools/subagent/start.js";
 import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invoke-preparation.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
@@ -102,6 +104,86 @@ beforeEach(() => {
 });
 
 describe("owner agent invocation dispatch", () => {
+  it("removes a callback-incompatible remote handle and never redelivers or starts a replacement", async () => {
+    const remoteAction = { ...action, kind: "remote-agent-call", remoteAgentName: "research" };
+    const remoteSession = {
+      ...session,
+      state: setAgentHandleStore(undefined, {
+        handles: [
+          {
+            ...availableRecord,
+            address: {
+              kind: "agent/remote",
+              sessionId: "old-child",
+              url: "https://child.example.com",
+              callbackBaseUrl: "https://parent.example.com",
+            },
+          },
+        ],
+      }),
+    };
+    const plan = [{ action: remoteAction, agentId: "agent-1", kind: "resume" }];
+    vi.mocked(readDurableSession).mockReturnValue(remoteSession as never);
+    vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
+      ...prepared,
+      session: remoteSession,
+      plan,
+    } as never);
+    vi.mocked(createAgentContinuationBundle).mockReturnValueOnce({
+      subagentRegistry: {
+        subagentsByNodeId: new Map([
+          [
+            action.nodeId,
+            {
+              definition: { kind: "remote", name: "research", url: "https://child.example.com" },
+            },
+          ],
+        ]),
+      },
+    } as never);
+    const actual = await vi.importActual<typeof import("#subagents/handle-dispatch.js")>(
+      "#subagents/handle-dispatch.js",
+    );
+    vi.mocked(dispatchToClaimedAgentAddress).mockImplementationOnce(
+      actual.dispatchToClaimedAgentAddress,
+    );
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        Response.json(AgentHandleError.SessionCallbackIncompatible.toJson(), { status: 409 }),
+      );
+    try {
+      const failed = await dispatch();
+      expect(failed).toMatchObject({
+        kind: "failed",
+        result: {
+          isError: true,
+          output: {
+            code: "AGENT_UNREACHABLE",
+            message: expect.stringContaining("Start a new session"),
+          },
+        },
+      });
+      const updated = failed.sessionState.snapshot.session;
+      expect(getAgentHandleStore(updated.state)?.handles ?? []).toEqual([]);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(startSubagent).not.toHaveBeenCalled();
+
+      vi.mocked(readDurableSession).mockReturnValue(updated as never);
+      vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
+        ...prepared,
+        session: { ...remoteSession, state: updated.state },
+        plan,
+      } as never);
+      await expect(dispatch()).resolves.toMatchObject({ kind: "failed" });
+      expect(dispatchToClaimedAgentAddress).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(startSubagent).not.toHaveBeenCalled();
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   it("resumes an addressed agent through its owning task", async () => {
     vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
       ...prepared,

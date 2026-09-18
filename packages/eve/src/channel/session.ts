@@ -1,3 +1,4 @@
+import { attachCallbackOrigin, readCallbackOrigin } from "#internal/callback-auth.js";
 import type { ContextAccessor } from "#context/key.js";
 import {
   createChannelDeliveryMetadata,
@@ -267,7 +268,10 @@ export function sessionCallbackToTurnCaller(
     : {
         activityObserver,
         callId: callback.callId,
-        replyTo: { kind: "callback", token: callback.token, url: callback.url },
+        replyTo: attachCallbackOrigin(
+          { kind: "callback" as const, token: callback.token, url: callback.url },
+          readCallbackOrigin(callback),
+        ),
         subagentName: callback.subagentName,
         taskId: callback.taskId,
       };

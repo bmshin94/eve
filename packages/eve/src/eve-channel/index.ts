@@ -1,8 +1,11 @@
 import { handleExpiredLegacyAuthorization } from "#execution/legacy-session/authorization.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { AgentHandleError } from "#protocol/agent-handle-error.js";
+import { SessionCallbackIncompatibleError } from "#execution/session-inbox/encode.js";
 import type { SessionAuthContext, SessionParent, SessionTraceContext } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
 import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
+import { grantCallbackOrigin } from "#internal/callback-auth.js";
 import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
 import { handleActivityRequest } from "#execution/activity-route.js";
 import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
@@ -165,6 +168,11 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         const body = parseCreateBody(payload);
         if (body instanceof Response) return body;
+        grantCallbackOrigin(
+          body,
+          authResult.principalType !== "anonymous" &&
+            (forwarded.accepted || forwarded.trustedForwarder === true),
+        );
         const forwardedParentSession =
           body.callback === undefined
             ? "absent"
@@ -176,20 +184,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               forwarder: authResult.principalId,
             });
           } else {
-            let accepted = forwarded.accepted;
-            if (!accepted && input.trustedForwarders !== undefined) {
-              try {
-                accepted = await input.trustedForwarders(authResult);
-              } catch (error) {
-                const errorId = logError(log, "trustedForwarders handler failed", error, {
-                  forwarder: authResult.principalId,
-                });
-                return Response.json(
-                  { error: "trustedForwarders handler failed.", errorId, ok: false },
-                  { status: 500 },
-                );
-              }
-            }
+            const accepted = forwarded.accepted || forwarded.trustedForwarder === true;
             if (accepted) {
               parent = forwardedParentSession;
             } else {
@@ -361,14 +356,19 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (sessionId instanceof Response) return sessionId;
         const payload = await parseJsonRequest(req);
         if (payload instanceof Response) return payload;
+        const body = parseSessionMessageBody(payload);
+        if (body instanceof Response) return body;
         const forwarded = await resolveForwardedPrincipal({
           trustedForwarders: input.trustedForwarders,
           forwarder: authResult,
           payload,
         });
         if (forwarded instanceof Response) return forwarded;
-        const body = parseSessionMessageBody(payload);
-        if (body instanceof Response) return body;
+        grantCallbackOrigin(
+          body,
+          authResult.principalType !== "anonymous" &&
+            (forwarded.accepted || forwarded.trustedForwarder === true),
+        );
 
         const policyRejection = checkUploadPolicy(body, uploadPolicy);
         if (policyRejection !== null) return policyRejection;
@@ -410,6 +410,12 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               ? await session.send(body.message!, options)
               : await session.respond(body.inputResponses, options);
         } catch (error) {
+          if (error instanceof SessionCallbackIncompatibleError) {
+            return Response.json(AgentHandleError.SessionCallbackIncompatible.toJson(), {
+              headers: { "cache-control": "no-store" },
+              status: 409,
+            });
+          }
           const errorId = logError(log, "session-message request failed", error, { sessionId });
           return Response.json(
             { error: "Failed to send the session message.", errorId, ok: false },

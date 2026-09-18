@@ -231,7 +231,11 @@ async function runSessionLoop(
   const runTurn = async (payload: TurnStepPayload | undefined): Promise<TurnOutcome> => {
     const caller = progress.caller;
     if (caller?.taskId !== undefined) queue.rememberTask(caller.taskId);
-    if (caller !== undefined) {
+    if (
+      caller !== undefined ||
+      (cursor.serializedContext["eve.sessionCallback"] !== undefined &&
+        payload?.delivery?.payloads.some((entry) => entry.message !== undefined))
+    ) {
       await cursor.apply({
         serializedContext: await bindTurnCallerContextStep({
           caller,
@@ -250,7 +254,12 @@ async function runSessionLoop(
       sessionState: cursor.sessionState,
     });
     if (transfer.kind === "transferred") return transfer;
-    if (next.delivery.caller !== undefined) progress.caller = next.delivery.caller;
+    if (
+      next.delivery.caller !== undefined ||
+      next.delivery.payloads.some((entry) => entry.message !== undefined)
+    ) {
+      progress.caller = next.delivery.caller;
+    }
     return { action: await runTurn({ delivery: next.delivery }), kind: "action" };
   };
   const settleCancelledTurn = async () => {

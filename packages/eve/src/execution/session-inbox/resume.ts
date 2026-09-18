@@ -19,6 +19,11 @@ import {
 } from "#execution/session-inbox/address.js";
 import { getHookByToken, resumeHook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
+import {
+  commandHasCallbackGrant,
+  encodeSessionInboxCommand,
+} from "#execution/session-inbox/encode.js";
+import { SESSION_INBOX_WIRE_VERSION_METADATA_KEY } from "#execution/session-inbox/protocol.v8.js";
 
 /** Longest a delivery waits for a mid-handoff successor to claim its hooks. */
 const HANDOFF_RETRY_WINDOW_MS = 5_000;
@@ -45,7 +50,18 @@ export async function resumeSessionInbox(
   while (true) {
     let hook;
     try {
-      hook = await resumeHook(sessionInboxHookToken(token), command);
+      if (commandHasCallbackGrant(command)) {
+        const target = await getHookByToken(sessionInboxHookToken(token));
+        const metadata = await target.metadata;
+        const payload = encodeSessionInboxCommand(
+          command,
+          isObject(metadata) ? metadata[SESSION_INBOX_WIRE_VERSION_METADATA_KEY] : undefined,
+        );
+        // Pin delivery to the exact consumer whose grant support was checked.
+        hook = await resumeHook(target, payload);
+      } else {
+        hook = await resumeHook(sessionInboxHookToken(token), command);
+      }
     } catch (error) {
       if (!HookNotFoundError.is(error)) throw error;
       if (await isHandoffInProgress(token, deadline)) continue;

@@ -11,6 +11,11 @@ import {
 } from "#execution/session-inbox/address.js";
 import { getHookByToken, resumeHook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
+import {
+  commandHasCallbackGrant,
+  encodeSessionInboxCommand,
+} from "#execution/session-inbox/encode.js";
+import { SESSION_INBOX_WIRE_VERSION_METADATA_KEY } from "#execution/session-inbox/protocol.v8.js";
 
 type Command = DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload;
 type Hook = Awaited<ReturnType<typeof getHookByToken>>;
@@ -63,7 +68,17 @@ export async function resumeLegacyInbox(token: string, command: Command) {
       isObject(metadata) ? metadata.sessionInboxWireVersion : undefined,
     );
   }
-  const hook = await resumeHook(target.hook.token, payload);
+  if (target.current && commandHasCallbackGrant(command)) {
+    const metadata = await target.hook.metadata;
+    payload = encodeSessionInboxCommand(
+      command,
+      isObject(metadata) ? metadata[SESSION_INBOX_WIRE_VERSION_METADATA_KEY] : undefined,
+    );
+  }
+  const hook = await resumeHook(
+    commandHasCallbackGrant(command) ? target.hook : target.hook.token,
+    payload,
+  );
   return { ownerRunId: hook.runId, sessionId: Promise.resolve(target.sessionId) };
 }
 
@@ -87,6 +102,8 @@ export function encodeLegacyCommand(command: Command, declaredVersion: unknown):
     }
     return value;
   }
+  // Every legacy consumer predates callback credential grants.
+  encodeSessionInboxCommand(command, version);
   const payloads = (command.kind === "send" ? [command.payload] : command.payloads).map(
     (payload) => {
       if (payload.task === undefined || version >= 5) return payload;

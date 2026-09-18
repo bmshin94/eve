@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { sessionCommandInboxWorkflow } from "#internal/testing/session-inbox-workflow.js";
+import {
+  sessionCommandInboxWorkflow,
+  sessionCallbackGrantInboxWorkflow,
+} from "#internal/testing/session-inbox-workflow.js";
+import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
+import { sessionCallbackToTurnCaller } from "#channel/session.js";
+import { attachCallbackOrigin } from "#internal/callback-auth.js";
 import { sessionHookPumpWorkflow } from "#internal/testing/session-hook-pump-workflow.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getHookByToken, resumeHook, start } from "#internal/workflow/runtime.js";
@@ -11,6 +17,41 @@ import {
 } from "#execution/session-inbox/address.js";
 
 describe("session command inbox integration", () => {
+  it("round-trips grants through the real durable inbox without granting old payloads", async () => {
+    const origin = "https://parent.example.com";
+    const caller = sessionCallbackToTurnCaller(
+      attachCallbackOrigin(
+        {
+          callId: "call",
+          subagentName: "worker",
+          token: "opaque",
+          url: `${origin}/eve/v1/callback/opaque`,
+        },
+        origin,
+      ),
+    );
+    const run = await start(sessionCallbackGrantInboxWorkflow, []);
+    const token = sessionCommandHookToken(run.runId);
+    try {
+      await waitForHook(run, { token: sessionInboxHookToken(token) });
+      await resumeSessionInbox(token, { kind: "send", payload: { message: "first" }, caller });
+      await resumeHook(sessionInboxHookToken(token), {
+        kind: "send",
+        payload: { message: "old" },
+        caller,
+      });
+      await expect(run.returnValue).resolves.toEqual([
+        caller,
+        {
+          ...caller,
+          replyTo: { kind: "callback", token: "opaque", url: `${origin}/eve/v1/callback/opaque` },
+        },
+      ]);
+    } finally {
+      if ((await run.status) === "running") await run.cancel();
+    }
+  });
+
   it("pumps a burst across aliases while the owner waits on an independent hook", async () => {
     const aliases = ["http:pump:first", "http:pump:second"];
     const releaseToken = "pump:release";

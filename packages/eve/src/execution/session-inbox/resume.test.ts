@@ -5,16 +5,61 @@ import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 
 const resumeHookMock = vi.fn();
+const getHookByTokenMock = vi.fn();
 
 vi.mock("#internal/workflow/runtime.js", () => ({
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
+  getHookByToken: (...args: unknown[]) => getHookByTokenMock(...args),
 }));
 
 afterEach(() => {
   resumeHookMock.mockReset();
+  getHookByTokenMock.mockReset();
 });
 
 describe("session inbox resume", () => {
+  const origin = "https://parent.example.com";
+  const granted = {
+    kind: "send" as const,
+    payload: { message: "report" },
+    caller: {
+      callId: "call",
+      subagentName: "worker",
+      replyTo: {
+        kind: "callback" as const,
+        token: "opaque",
+        url: `${origin}/eve/v1/callback/opaque`,
+        __eveCallbackOrigin: origin,
+      },
+    },
+  };
+
+  it("pins a granted delivery to the exact hook advertising v8", async () => {
+    const hook = sessionHook("owner-2", "alias", {
+      sessionId: "anchor",
+      sessionInboxWireVersion: 8,
+    });
+    getHookByTokenMock.mockResolvedValue(hook);
+    resumeHookMock.mockResolvedValue(hook);
+    const receipt = await resumeSessionInbox("alias", granted);
+    expect(resumeHookMock).toHaveBeenCalledExactlyOnceWith(hook, { ...granted, version: 8 });
+    await expect(receipt.sessionId).resolves.toBe("anchor");
+  });
+
+  it.each([undefined, 1, 2, 3, 4, 5, 6, 7, 9])(
+    "does not resume or downgrade a grant for current hook version %s",
+    async (version) => {
+      getHookByTokenMock.mockResolvedValue(
+        sessionHook("old-owner", "alias", {
+          sessionId: "anchor",
+          sessionInboxWireVersion: version,
+        }),
+      );
+      await expect(resumeSessionInbox("alias", granted)).rejects.toThrow("Start a new session");
+      expect(resumeHookMock).not.toHaveBeenCalled();
+    },
+  );
+
   it("resumes the current owner while preserving public session identity", async () => {
     const token = sessionCommandHookToken("session-1");
     const hook = sessionHook("owner-2", token, { sessionId: "session-1" });

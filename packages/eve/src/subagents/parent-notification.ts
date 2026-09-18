@@ -5,8 +5,13 @@
 
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
-import { parseSessionCallback } from "#channel/session-callback.js";
-import type { TurnCaller } from "#channel/types.js";
+import {
+  attachCallbackOrigin,
+  parseStoredSessionCallback,
+  readCallbackOrigin,
+} from "#internal/callback-auth.js";
+import { sessionCallbackToTurnCaller } from "#channel/session.js";
+import type { ActivityObserverConfig, TurnCaller } from "#channel/types.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import { ActivityObserverKey, SessionCallbackKey } from "#context/keys.js";
 import {
@@ -123,6 +128,7 @@ export async function notifyTurnCallerStep(input: {
     await postSettledTurnCallback({
       result,
       sessionId: input.sessionId,
+      callbackOrigin: readCallbackOrigin(input.caller.replyTo),
       url: input.caller.replyTo.url,
     });
     return;
@@ -163,6 +169,7 @@ export async function notifyCancelledTaskCallerStep(input: {
     await postSettledTurnCallback({
       result,
       sessionId: input.sessionId,
+      callbackOrigin: readCallbackOrigin(input.caller.replyTo),
       url: input.caller.replyTo.url,
     });
     return;
@@ -224,22 +231,11 @@ export async function resolveInitialTurnCallerStep(input: {
 
   const callbackValue = input.serializedContext[SessionCallbackKey.name];
   if (callbackValue !== undefined) {
-    const parsed = parseSessionCallback(callbackValue);
-    if (!parsed.ok) {
-      throw new Error("Serialized session callback is invalid.", {
-        cause: parsed.cause,
-      });
-    }
-    return {
-      callId: parsed.callback.callId,
-      replyTo: {
-        kind: "callback",
-        token: parsed.callback.token,
-        url: parsed.callback.url,
-      },
-      subagentName: parsed.callback.subagentName,
-      taskId: parsed.callback.taskId ?? readTaskIdFromInboxToken(parsed.callback.token),
-    };
+    const callback = parseStoredSessionCallback(callbackValue);
+    return sessionCallbackToTurnCaller(
+      { ...callback, taskId: callback.taskId ?? readTaskIdFromInboxToken(callback.token) },
+      input.serializedContext[ActivityObserverKey.name] as ActivityObserverConfig | undefined,
+    );
   }
 
   const ctx = await deserializeContext(input.serializedContext);
@@ -264,18 +260,39 @@ export async function bindTurnCallerContextStep(input: {
   "use step";
 
   const caller = input.caller;
-  if (caller === undefined) return input.serializedContext;
+  if (caller === undefined) {
+    if (input.serializedContext[SessionCallbackKey.name] === undefined)
+      return input.serializedContext;
+    const {
+      [SessionCallbackKey.name]: _callback,
+      [ActivityObserverKey.name]: _observer,
+      ...context
+    } = input.serializedContext;
+    return context;
+  }
+  // A new remote caller must not inherit the previous caller's collector or grant.
+  const { [ActivityObserverKey.name]: previousObserver, ...withoutActivity } =
+    input.serializedContext;
+  const observer =
+    caller.activityObserver ??
+    (caller.replyTo.kind === "hook" &&
+    input.serializedContext[SessionCallbackKey.name] === undefined
+      ? previousObserver
+      : undefined);
   const withActivity =
-    caller.activityObserver === undefined
-      ? input.serializedContext
-      : { ...input.serializedContext, [ActivityObserverKey.name]: caller.activityObserver };
+    observer === undefined
+      ? withoutActivity
+      : { ...withoutActivity, [ActivityObserverKey.name]: observer };
   if (caller.replyTo.kind === "callback") {
-    const callback = {
-      callId: caller.callId,
-      subagentName: caller.subagentName,
-      token: caller.replyTo.token,
-      url: caller.replyTo.url,
-    };
+    const callback = attachCallbackOrigin(
+      {
+        callId: caller.callId,
+        subagentName: caller.subagentName,
+        token: caller.replyTo.token,
+        url: caller.replyTo.url,
+      },
+      readCallbackOrigin(caller.replyTo),
+    );
     return {
       ...withActivity,
       [SessionCallbackKey.name]:
@@ -301,8 +318,9 @@ export async function bindTurnCallerContextStep(input: {
     subagentName: caller.subagentName,
   };
   if (caller.taskId !== undefined) nextState.taskId = caller.taskId;
+  const { [SessionCallbackKey.name]: _callback, ...localContext } = withActivity;
   return {
-    ...withActivity,
+    ...localContext,
     [ChannelKey.name]: {
       ...adapter,
       state: nextState,
@@ -314,6 +332,7 @@ async function postSettledTurnCallback(input: {
   readonly result: RuntimeSubagentChildResult;
   /** Informational on the wire (tracing); the receiver never verifies it. */
   readonly sessionId: string;
+  readonly callbackOrigin?: string;
   readonly url: string;
 }): Promise<void> {
   const { sessionId } = input;
@@ -327,6 +346,7 @@ async function postSettledTurnCallback(input: {
         sessionId,
         subagentName: input.result.subagentName,
       },
+      callbackOrigin: input.callbackOrigin,
       url: input.url,
     });
     return;
@@ -341,16 +361,19 @@ async function postSettledTurnCallback(input: {
       sessionId,
       subagentName: input.result.subagentName,
     },
+    callbackOrigin: input.callbackOrigin,
     url: input.url,
   });
 }
 
 async function postCallbackPayload(input: {
   readonly payload: unknown;
+  readonly callbackOrigin?: string;
   readonly url: string;
 }): Promise<void> {
   const response = await postSessionCallbackRequest({
     body: input.payload,
+    callbackOrigin: input.callbackOrigin,
     url: input.url,
   });
 

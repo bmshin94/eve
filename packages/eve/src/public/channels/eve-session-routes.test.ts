@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { RouteHandlerArgs } from "#channel/routes.js";
-import type { Session } from "#channel/session.js";
+import { createSession, type Session } from "#channel/session.js";
+import type { Runtime } from "#channel/types.js";
+import {
+  encodeSessionInboxCommand,
+  SessionCallbackIncompatibleError,
+} from "#execution/session-inbox/encode.js";
+import { SessionInboxPayloadError } from "#execution/session-inbox/protocol.v8.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { writeForwardedParentSessionBaggage } from "#protocol/baggage.js";
@@ -336,7 +342,15 @@ describe("eve ID-addressed session routes", () => {
             : undefined,
         }),
       );
-      expect(trustedForwarders).not.toHaveBeenCalled();
+      expect(trustedForwarders).toHaveBeenCalledTimes(callback ? 1 : 0);
+      if (callback) {
+        expect(trustedForwarders).toHaveBeenCalledWith(
+          expect.objectContaining({ principalType: "anonymous" }),
+        );
+        expect(createSession.mock.calls[0]?.[0]?.callback).not.toHaveProperty(
+          "__eveCallbackOrigin",
+        );
+      }
     },
   );
 
@@ -441,6 +455,102 @@ describe("eve ID-addressed session routes", () => {
     expect(rejected.status).toBe(400);
     expect(session.send).toHaveBeenCalledTimes(1);
   });
+
+  it.each([undefined, 7, 8])(
+    "preserves callback grants or rejects before delivery to consumer %s",
+    async (version) => {
+      const deliver = vi.fn();
+      const dispatchSession = vi.fn(
+        async ({ command }: Parameters<Runtime["dispatchSession"]>[0]) => {
+          const encoded = encodeSessionInboxCommand(command, version);
+          deliver(encoded);
+          return { status: "accepted", sessionId: "wrun_A" };
+        },
+      );
+      const session = createSession("wrun_A", { dispatchSession } as never);
+      const response = await route("POST", "/eve/v1/session/:sessionId", {
+        auth: () => ({
+          attributes: {},
+          authenticator: "test",
+          principalId: "parent",
+          principalType: "service",
+        }),
+        trustedForwarders: () => true,
+      })(
+        new Request("https://eve.test/eve/v1/session/wrun_A", {
+          body: JSON.stringify({
+            message: "Alice asks Bob for the next report.",
+            callback: {
+              callId: "call-next",
+              subagentName: "research",
+              token: "parent-inbox",
+              url: "https://parent.example.com/eve/v1/callback/parent-inbox",
+            },
+          }),
+          method: "POST",
+        }),
+        createArgs(session),
+      );
+
+      expect(dispatchSession).toHaveBeenCalledTimes(1);
+      if (version === 8) {
+        expect(response.status).toBe(202);
+        expect(deliver).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({
+            version: 8,
+            caller: expect.objectContaining({
+              replyTo: expect.objectContaining({
+                __eveCallbackOrigin: "https://parent.example.com",
+              }),
+            }),
+          }),
+        );
+      } else {
+        expect(deliver).not.toHaveBeenCalled();
+        expect(response.status).toBe(409);
+        expect(response.headers.get("cache-control")).toBe("no-store");
+        await expect(response.json()).resolves.toEqual({
+          code: "SESSION_CALLBACK_INCOMPATIBLE",
+          error:
+            "Callback authorization requires session inbox wire version 8. Start a new session on the upgraded deployment.",
+          ok: false,
+        });
+      }
+    },
+  );
+
+  it("projects incompatibility safely instead of exposing the thrown message", async () => {
+    const error = new SessionCallbackIncompatibleError();
+    error.message = "private runtime detail";
+    const response = await route("POST", "/eve/v1/session/:sessionId")(
+      new Request("https://eve.test/eve/v1/session/wrun_A", {
+        body: JSON.stringify({ message: "follow-up" }),
+        method: "POST",
+      }),
+      createArgs(createFixedSession({ send: vi.fn().mockRejectedValue(error) })),
+    );
+    expect(response.status).toBe(409);
+    expect(await response.text()).not.toContain("private runtime detail");
+  });
+
+  it.each([new Error("private runtime detail"), new SessionInboxPayloadError("invalid grant")])(
+    "keeps unrelated continuation errors generic: %s",
+    async (error) => {
+      const response = await route("POST", "/eve/v1/session/:sessionId")(
+        new Request("https://eve.test/eve/v1/session/wrun_A", {
+          body: JSON.stringify({ message: "follow-up" }),
+          method: "POST",
+        }),
+        createArgs(createFixedSession({ send: vi.fn().mockRejectedValue(error) })),
+      );
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({
+        error: "Failed to send the session message.",
+        errorId: expect.any(String),
+        ok: false,
+      });
+    },
+  );
 
   it("returns conflict instead of creating when an exact session is inactive", async () => {
     const session = createFixedSession({

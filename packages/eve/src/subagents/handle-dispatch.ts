@@ -118,7 +118,7 @@ export async function dispatchToClaimedAgentAddress(input: {
         action,
         code: AGENT_UNREACHABLE,
         message: permanent
-          ? `Agent "${handle.identity.name}" with id "${agentId}" is no longer reachable.`
+          ? `Agent "${handle.identity.name}" with id "${agentId}" is no longer reachable. Start a new session instead of retrying this agentId.`
           : `Agent "${handle.identity.name}" with id "${agentId}" is temporarily unreachable. Try again.`,
       }),
       session: input.currentSession,

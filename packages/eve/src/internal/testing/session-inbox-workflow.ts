@@ -2,6 +2,7 @@ import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import { createSessionInbox, type SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
+import { decodeSessionInboxPayload } from "#execution/session-inbox/protocol.js";
 
 export async function sessionCommandInboxWorkflow(input: {
   readonly messageCount?: number;
@@ -30,6 +31,26 @@ export async function sessionCommandInboxWorkflow(input: {
       if (messages.length >= (input.messageCount ?? 2)) return messages;
       payload = await inbox.next();
     }
+  } finally {
+    await inbox.dispose();
+  }
+}
+
+export async function sessionCallbackGrantInboxWorkflow(): Promise<unknown[]> {
+  "use workflow";
+
+  const { workflowRunId } = getWorkflowMetadata();
+  const inbox = createSessionInbox(workflowRunId);
+  try {
+    await inbox.claimSessionHook(sessionCommandHookToken(workflowRunId));
+    const callers: unknown[] = [];
+    while (callers.length < 2) {
+      const next = await inbox.next();
+      if (next === undefined) break;
+      const delivery = decodeSessionInboxPayload(next);
+      if (delivery.kind === "deliver") callers.push(delivery.caller);
+    }
+    return callers;
   } finally {
     await inbox.dispose();
   }

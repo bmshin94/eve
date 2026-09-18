@@ -1,21 +1,17 @@
-import type { AuthFn } from "eve/channels/auth";
+import { type AuthFn, vercelOidc } from "eve/channels/auth";
 import { eveChannel } from "eve/channels/eve";
 import type { SessionAuthContext } from "eve/context";
 
 /**
- * Authored eve channel for the remote principal-forwarding eval. Four
- * deterministic principals, no injected env (the deployment is deliberately
- * open — fixture-only; do not pattern production channels off this):
- *
- * - The `remote-loopback` hop authenticates with a fixture authorization and runs as
- *   the `router-app` service principal — the trusted forwarder.
- * - Bob and the observer each have a fixture authorization, so the eval can continue
- *   Alice's child as two distinct callers. Bob has his own user grant; the
- *   observer deliberately has none.
- * - Every other caller (the local eval driver is anonymous; the Vercel one
- *   may carry ambient OIDC) falls through to Alice's fixed user principal.
+ * Fixture users remain public, but the trusted router can nominate recipients
+ * of this deployment's OIDC token. On Vercel it must authenticate a deployment
+ * identity through Vercel OIDC; only outside Vercel is the marker sufficient.
+ * The nonsecret marker distinguishes remote calls from the eval driver, which
+ * may carry the same project's OIDC but must still run as Alice by default.
+ * Bob and the grantless observer exercise per-turn user forwarding. None of
+ * these mock users may authorize delegation context.
  */
-const ROUTER_AUTHORIZATION = "Bearer e2e-workspace-label-router";
+const authenticateVercel = vercelOidc();
 const BOB_AUTHORIZATION = "Bearer e2e-workspace-label-bob";
 const OBSERVER_AUTHORIZATION = "Bearer e2e-workspace-label-observer";
 
@@ -30,11 +26,17 @@ function createFixtureUserPrincipal(principalId: string): SessionAuthContext {
   };
 }
 
-const authenticateRouter: AuthFn<Request> = (request) => {
-  if (request.headers.get("authorization") !== ROUTER_AUTHORIZATION) return null;
+const authenticateRouter: AuthFn<Request> = async (request) => {
+  if (request.headers.get("x-eve-e2e-router") !== "remote-loopback") return null;
+  if (process.env.VERCEL === "1") {
+    const principal = await authenticateVercel(request);
+    if (principal?.principalType !== "runtime" && principal?.principalType !== "service") {
+      return null;
+    }
+  }
   return {
     attributes: {},
-    authenticator: "e2e-bearer",
+    authenticator: process.env.VERCEL === "1" ? "e2e-vercel-oidc" : "e2e-local",
     principalId: "router-app",
     principalType: "service",
   };
@@ -54,5 +56,8 @@ const authenticateDefaultUser: AuthFn<Request> = () => createFixtureUserPrincipa
 
 export default eveChannel({
   auth: [authenticateRouter, authenticateBob, authenticateObserver, authenticateDefaultUser],
-  trustedForwarders: (forwarder) => forwarder.principalId === "router-app",
+  trustedForwarders: (forwarder) =>
+    forwarder.principalType === "service" &&
+    forwarder.principalId === "router-app" &&
+    forwarder.authenticator === (process.env.VERCEL === "1" ? "e2e-vercel-oidc" : "e2e-local"),
 });

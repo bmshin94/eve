@@ -20,6 +20,10 @@ function defineAgentHandleError<const TCode extends string>(
 
 /** Stable agent-handle errors shared by HTTP producers and consumers. */
 export const AgentHandleError = {
+  SessionCallbackIncompatible: defineAgentHandleError(
+    "SESSION_CALLBACK_INCOMPATIBLE",
+    "Callback authorization requires session inbox wire version 8. Start a new session on the upgraded deployment.",
+  ),
   SessionNotResumable: defineAgentHandleError(
     "SESSION_NOT_RESUMABLE",
     "Session is not active and cannot be resumed.",

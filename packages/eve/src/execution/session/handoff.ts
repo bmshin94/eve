@@ -19,7 +19,8 @@ import type { RunMode } from "#shared/run-mode.js";
  * build than the owner that produced it; bump when any field changes shape so
  * an incompatible successor rejects the handoff instead of misreading state.
  */
-export const SESSION_CHECKPOINT_VERSION = 4;
+// Older owners must not discard server-owned callback authority during handoff.
+export const SESSION_CHECKPOINT_VERSION = 5;
 
 /** Everything a successor needs to continue an idle session. Hooks are derived from the state. */
 export interface SessionCheckpoint {

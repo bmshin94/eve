@@ -1,5 +1,5 @@
 import type { SessionCallback, SubagentAuthorizationEvent } from "#channel/types.js";
-import { parseSessionCallback } from "#channel/session-callback.js";
+import { parseStoredSessionCallback, readCallbackOrigin } from "#internal/callback-auth.js";
 import { SessionCallbackKey } from "#context/keys.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
 import { SESSION_FAILED } from "#subagents/agent-handle-errors.js";
@@ -21,7 +21,7 @@ export async function fireTaskEventCallbackStep(input: {
 }): Promise<void> {
   "use step";
 
-  const callback = parseSerializedSessionCallback(input.callback);
+  const callback = parseStoredSessionCallback(input.callback);
   if (callback.taskId === undefined) return;
   const inputRequested = input.event.type === "input.requested";
   const kind = inputRequested ? "task.input-requested" : "task.authorization";
@@ -35,6 +35,7 @@ export async function fireTaskEventCallbackStep(input: {
       subagentName: callback.subagentName,
       taskId: callback.taskId,
     },
+    callbackOrigin: readCallbackOrigin(callback),
     url: callback.url,
   });
   if (!response.ok) {
@@ -73,7 +74,7 @@ export async function fireSessionCallbackStep(input: {
 
   let callback: SessionCallback;
   try {
-    callback = parseSerializedSessionCallback(value);
+    callback = parseStoredSessionCallback(value);
   } catch (error) {
     log.error("invalid session callback metadata", { error, sessionId });
     throw error;
@@ -98,7 +99,11 @@ export async function fireSessionCallbackStep(input: {
           usage: input.usage,
         };
 
-  const response = await postSessionCallbackRequest({ body, url: callback.url });
+  const response = await postSessionCallbackRequest({
+    body,
+    callbackOrigin: readCallbackOrigin(callback),
+    url: callback.url,
+  });
 
   if (!response.ok) {
     throw new Error(`Session callback failed with HTTP ${response.status}.`);
@@ -119,15 +124,4 @@ function buildCompletedCallbackBody(input: {
     subagentName: input.callback.subagentName,
   };
   return input.usage === undefined ? base : { ...base, usage: input.usage };
-}
-
-function parseSerializedSessionCallback(value: unknown): SessionCallback {
-  const parsed = parseSessionCallback(value);
-  if (!parsed.ok) {
-    throw new Error("Serialized session callback is invalid.", {
-      cause: parsed.cause,
-    });
-  }
-
-  return parsed.callback;
 }

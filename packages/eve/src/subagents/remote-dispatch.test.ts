@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
+import { attachCallbackOrigin, CALLBACK_ORIGIN_KEY } from "#internal/callback-auth.js";
 import { readForwardedParentSessionBaggage } from "#protocol/baggage.js";
 import {
   cancelRemoteAgentTurn,
@@ -169,6 +170,62 @@ describe("startRemoteAgentSession", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+  });
+
+  it("does not forward this deployment's grant into remote create or continuation bodies", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(async () =>
+        Response.json(
+          { ok: true, sessionId: "remote-session", status: "accepted" },
+          { status: 202 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const origin = "https://caller.example.com";
+    const observer = {
+      sink: attachCallbackOrigin(
+        { url: `${origin}/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456`, version: 1 as const },
+        origin,
+      ),
+    };
+    const callback = attachCallbackOrigin(
+      {
+        callId: "call",
+        subagentName: "research",
+        token: "opaque",
+        url: `${origin}/eve/v1/callback/opaque`,
+      },
+      origin,
+    );
+    await startRemoteAgentSession({
+      action: createAction(),
+      callbackBaseUrl: origin,
+      activityObserver: observer,
+      remote: createRemoteAgent(),
+      session: {
+        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100000 },
+        continuationToken: "parent",
+        history: [],
+        sessionId: "parent",
+        state: {},
+      },
+    });
+    await continueRemoteAgentSession({
+      auth: null,
+      callback,
+      activityObserver: observer,
+      message: "next",
+      remote: createRemoteAgent(),
+      sessionId: "remote-session",
+    });
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(init.body).not.toContain(CALLBACK_ORIGIN_KEY);
+      expect(JSON.parse(init.body).activityObserver.sink.url).toBe(observer.sink.url);
+    }
+    expect(observer.sink).toHaveProperty(CALLBACK_ORIGIN_KEY, origin);
+    expect(callback).toHaveProperty(CALLBACK_ORIGIN_KEY, origin);
   });
 
   it("carries a replay-stable operation id so the receiver can create once", async () => {
@@ -1058,7 +1115,47 @@ describe("continueRemoteAgentSession", () => {
     expect(isRetryableRemoteAgentContinueError(error)).toBe(true);
   });
 
-  it("classifies only missing-session continue failures as permanent", async () => {
+  it.each([
+    { status: 409, code: "SESSION_CALLBACK_INCOMPATIBLE", retryable: false, ambiguous: false },
+    { status: 409, code: "session_not_ready", retryable: true, ambiguous: false },
+    { status: 409, code: undefined, retryable: true, ambiguous: false },
+    { status: 500, code: "SESSION_CALLBACK_INCOMPATIBLE", retryable: true, ambiguous: true },
+  ])(
+    "classifies callback incompatibility only for the explicit conflict response: $status/$code",
+    async ({ status, code, retryable, ambiguous }) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(
+          Response.json({ code, error: "untrusted receiver detail", ok: false }, { status }),
+        );
+      vi.stubGlobal("fetch", fetchMock);
+      const error = await continueRemoteAgentSession({
+        auth: null,
+        callback: {
+          callId: "call-next",
+          subagentName: "research",
+          token: "parent-inbox",
+          url: "https://caller.example.com/eve/v1/callback/parent-inbox",
+        },
+        message: "follow up",
+        remote: createRemoteAgent(),
+        sessionId: "remote-session",
+      }).catch((cause: unknown) => cause);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(isRetryableRemoteAgentContinueError(error)).toBe(retryable);
+      expect(isAmbiguousRemoteAgentContinueError(error)).toBe(ambiguous);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).not.toContain("untrusted receiver detail");
+      if (!retryable) {
+        expect((error as Error).message).toContain(
+          "Start a new session on the upgraded deployment.",
+        );
+      }
+    },
+  );
+
+  it("classifies missing-session continue failures as permanent", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(new Response(null, { status: 503 }))

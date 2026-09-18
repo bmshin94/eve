@@ -1,4 +1,8 @@
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
+import {
+  SESSION_INBOX_WIRE_VERSION,
+  SESSION_INBOX_WIRE_VERSION_METADATA_KEY,
+} from "#execution/session-inbox/protocol.v8.js";
 import { createHook, getWorkflowMetadata, type Hook } from "#compiled/@workflow/core/index.js";
 import { releaseSessionHooksStep } from "#execution/session-inbox/release-step.js";
 
@@ -131,7 +135,10 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       token,
       hook: createHook<SessionInboxPayload>({
         token: sessionInboxHookToken(token),
-        metadata: { sessionId },
+        metadata: {
+          sessionId,
+          [SESSION_INBOX_WIRE_VERSION_METADATA_KEY]: SESSION_INBOX_WIRE_VERSION,
+        },
       }),
       stopping: false,
       closed: false,

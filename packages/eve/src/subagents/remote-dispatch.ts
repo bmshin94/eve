@@ -1,4 +1,5 @@
 import { z } from "#compiled/zod/index.js";
+import { publicActivityObserver } from "#internal/callback-auth.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
 import { ResetResponseSchema, type ResetResponse } from "#protocol/reset-session.js";
 import { AgentHandleError } from "#protocol/agent-handle-error.js";
@@ -127,7 +128,8 @@ export async function startRemoteAgentSession(input: {
     outputSchema:
       normalizeRequestedOutputSchema(input.action.input.outputSchema) ?? input.remote.outputSchema,
   };
-  if (input.activityObserver !== undefined) requestBody.activityObserver = input.activityObserver;
+  if (input.activityObserver !== undefined)
+    requestBody.activityObserver = publicActivityObserver(input.activityObserver);
   if (forwardedPrincipal !== undefined) {
     requestBody.forwardedPrincipal = forwardedPrincipal;
   }
@@ -239,8 +241,17 @@ export async function continueRemoteAgentSession(input: {
     message: string;
     outputSchema?: JsonObject;
   } = {
-    activityObserver: input.activityObserver,
-    callback: input.callback,
+    activityObserver: publicActivityObserver(input.activityObserver),
+    callback:
+      input.callback === undefined
+        ? undefined
+        : {
+            callId: input.callback.callId,
+            subagentName: input.callback.subagentName,
+            taskId: input.callback.taskId,
+            token: input.callback.token,
+            url: input.callback.url,
+          },
     message: input.message,
     outputSchema: input.outputSchema,
   };
@@ -259,10 +270,15 @@ export async function continueRemoteAgentSession(input: {
 
   if (!response.ok) {
     const responseCode = await readRemoteAgentErrorCode(response);
+    const callbackIncompatible =
+      response.status === 409 && responseCode === AgentHandleError.SessionCallbackIncompatible.code;
     const permanent =
-      response.status === 404 || responseCode === AgentHandleError.SessionNotResumable.code;
-    const compatibilityHint =
-      response.status === 400 && forwardedPrincipal !== undefined
+      callbackIncompatible ||
+      response.status === 404 ||
+      responseCode === AgentHandleError.SessionNotResumable.code;
+    const compatibilityHint = callbackIncompatible
+      ? ` ${AgentHandleError.SessionCallbackIncompatible.toJson().error}`
+      : response.status === 400 && forwardedPrincipal !== undefined
         ? " The receiver may support forwarded principals only on session creation; upgrade it before retrying."
         : "";
     throw new RemoteAgentContinueRequestError(
@@ -298,8 +314,8 @@ export class RemoteAgentContinueRequestError extends Error {
 }
 
 /**
- * Returns true when a failed continue request may be retried. Only a
- * session that no longer exists (404 / SESSION_NOT_RESUMABLE) is permanent;
+ * Returns true when a failed continue request may be retried. Missing or
+ * non-resumable sessions and incompatible callback consumers are permanent;
  * transient HTTP and network failures stay retryable so the dispatch step
  * keeps the agent handle and surfaces a retryable error instead of
  * discarding it — the model decides whether to try the same agentId again

@@ -239,7 +239,17 @@ export default eveChannel({
 
 `trustedForwarders` authorizes the verified forwarder to supply eve delegation context: principal identity, parent session lineage, and, with principal forwarding, trace-content constraints. Match it precisely: `() => true` grants this authority to every caller that passes route auth, including preview deployments accepted by `vercelOidc()`. The framework default channel rejects forwarded principals and ignores the other context.
 
-When the predicate accepts a create request, `ctx.session.auth.current` and `.initiator` carry the forwarded user exactly as if they had called your deployment directly. On continuation, only `auth.current` is replaced; `auth.initiator` remains the session creator. User-scoped connections, local subagents, and further `forwardPrincipal` hops therefore see the active turn's caller.
+Accepting a sender also permits that sender to nominate an HTTPS callback origin
+that receives this deployment's own current Vercel OIDC token. Only trust senders
+allowed to select recipients of that credential. The predicate runs for
+callback-only requests too, without `forwardPrincipal: true`; route auth alone
+does not grant this permission. Message continuations evaluate the policy again.
+Input-only answers must omit callback and activity bindings and resume pending
+work under its captured grant. Removing a sender does not revoke previously
+accepted work or its retries. See [Authenticate callbacks to a protected parent](./remote-agents#authenticate-callbacks-to-a-protected-parent)
+for the two-deployment setup and upgrade boundary.
+
+When the predicate accepts a create request containing a forwarded principal, `ctx.session.auth.current` and `.initiator` carry the forwarded user exactly as if they had called your deployment directly. On continuation, only `auth.current` is replaced; `auth.initiator` remains the session creator. User-scoped connections, local subagents, and further `forwardPrincipal` hops therefore see the active turn's caller.
 
 The forwarder is recorded on accepted contexts as the `eve:forwarded-by` attribute (always overwritten by the receiver, so a forwarder cannot falsify it). Forwarded identity rejections fail loud: a forwarded body without `trustedForwarders` configured or with a forwarder the predicate refuses is a `403`, and a malformed payload is a `400`. Only principal metadata is ever accepted — tokens and credentials never cross the hop.
 

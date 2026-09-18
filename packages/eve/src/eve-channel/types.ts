@@ -120,6 +120,15 @@ export interface EveChannelInput {
    * permissive predicate lets any authenticated forwarder assert any principal,
    * public trace audience, or remote lineage.
    *
+   * An accepted sender may also nominate an HTTPS callback origin to receive
+   * this deployment's own current Vercel OIDC token, even without principal
+   * forwarding. Trust only senders allowed to select recipients of that credential.
+   * Callback grants are captured per delegation, never as tokens. Message
+   * continuations evaluate this policy again; input-only answers must omit
+   * callback/activity bindings and keep the pending work's captured grant.
+   * Policy changes do not revoke previously accepted work. Anonymous senders
+   * and missing or refused policy add no callback credential permission.
+   *
    * When a trusted forwarder's assertion is accepted on session creation, the
    * forwarded principal replaces `session.auth.current` and
    * `session.auth.initiator`. On continuation, only `session.auth.current`

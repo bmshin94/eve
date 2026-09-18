@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
 import { serializeContext } from "#context/serialize.js";
-import { SessionCallbackKey, SessionIdKey } from "#context/keys.js";
+import { ActivityObserverKey, SessionCallbackKey, SessionIdKey } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
@@ -444,6 +444,47 @@ describe("turn caller notification", () => {
 });
 
 describe("turn caller binding", () => {
+  it.each(["none", "hook"])(
+    "removes previous remote callback authority for a %s caller",
+    async (kind) => {
+      const serializedContext = {
+        [SessionCallbackKey.name]: {
+          callId: "old",
+          subagentName: "worker",
+          token: "opaque",
+          url: "https://parent.example/eve/v1/callback/opaque",
+          __eveCallbackOrigin: "https://parent.example",
+        },
+        [ActivityObserverKey.name]: {
+          sink: {
+            version: 1,
+            url: "https://parent.example/eve/v1/activity/opaque",
+            __eveCallbackOrigin: "https://parent.example",
+          },
+        },
+        [ChannelKey.name]: {
+          kind: SUBAGENT_ADAPTER_KIND,
+          state: {
+            callId: "old",
+            parentContinuationToken: "old",
+            parentSessionId: "parent",
+            subagentName: "worker",
+          },
+        },
+      };
+      const context = await bindTurnCallerContextStep({
+        caller:
+          kind === "none"
+            ? undefined
+            : { callId: "new", subagentName: "worker", replyTo: { kind: "hook", token: "new" } },
+        serializedContext,
+      });
+      expect(context[SessionCallbackKey.name]).toBeUndefined();
+      expect(context[ActivityObserverKey.name]).toBeUndefined();
+      expect(serializedContext[SessionCallbackKey.name]).toHaveProperty("__eveCallbackOrigin");
+    },
+  );
+
   it("rebinds local adapter forwarding to a non-task continuation caller", async () => {
     await expect(
       bindTurnCallerContextStep({

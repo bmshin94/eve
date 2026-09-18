@@ -141,6 +141,20 @@ export function parseSessionMessageBody(
 
   const message = parseMessageField(payload.message);
   if (message instanceof Response) return message;
+  if (
+    message === undefined &&
+    payload.inputResponses !== undefined &&
+    (payload.callback !== undefined || payload.activityObserver !== undefined)
+  ) {
+    return Response.json(
+      {
+        error:
+          "'callback' and 'activityObserver' cannot accompany inputResponses-only requests. Omit both to answer the pending input under its existing callback binding; send a separate message request to establish a new binding.",
+        ok: false,
+      },
+      { status: 400 },
+    );
+  }
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
   const activityObserver = parseActivityObserverField(payload.activityObserver);

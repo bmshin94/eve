@@ -1,4 +1,5 @@
 import type { ActivitySinkV1 } from "#channel/types.js";
+import { readCallbackOrigin } from "#internal/callback-auth.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
 import type { ActivityEventV1 } from "#protocol/activity.js";
 import { parseActivityBatchV1 } from "#protocol/activity.js";
@@ -18,6 +19,7 @@ export async function submitActivity(input: {
     if (batch === undefined) return;
     const response = await postSessionCallbackRequest({
       body: batch,
+      callbackOrigin: readCallbackOrigin(input.sink),
       logFailures: false,
       timeoutMs: ACTIVITY_SUBMIT_TIMEOUT_MS,
       url: input.sink.url,

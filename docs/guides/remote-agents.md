@@ -114,6 +114,88 @@ Set `teamSlug`, `projectName`, and `environment` to the calling deployment's Ver
 
 If [Vercel Deployment Protection](https://vercel.com/docs/deployment-protection) is active on the receiving project, also configure [Trusted Sources](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/trusted-sources) to allow the calling project and environment. The eve subject allowlist and Trusted Sources are separate checks; cross-project calls need both.
 
+### Authenticate callbacks to a protected parent
+
+A remote call has two HTTP directions. The parent's `defineRemoteAgent.auth`
+authenticates session creation on the child. To authenticate the child's callbacks
+through the parent's Deployment Protection, configure `trustedForwarders` on the
+child and Trusted Sources on the parent:
+
+```ts title="agent/channels/eve.ts (child)"
+import { vercelOidc, vercelSubject } from "eve/channels/auth";
+import { eveChannel } from "eve/channels/eve";
+
+const parentSubject = vercelSubject({
+  teamSlug: "acme",
+  projectName: "router",
+  environment: "production",
+});
+
+export default eveChannel({
+  auth: [vercelOidc({ subjects: [parentSubject] })],
+  trustedForwarders: (sender) => sender.subject === parentSubject,
+});
+```
+
+On the parent Vercel project, configure [Trusted Sources](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/trusted-sources)
+to allow the child's project and environment. This permits the child's identity
+through Deployment Protection; the callback's opaque capability token still
+authorizes the callback itself. A callback URL's existing automation-bypass query
+parameter is preserved.
+
+`trustedForwarders` now grants more than identity forwarding: an accepted sender
+may nominate an HTTPS callback origin to receive the child's own Vercel OIDC
+token. Only trust senders allowed to select recipients of that credential. The
+origin comes from that delegation's validated callback URL, not a deployment-wide
+origin list. eve does not verify that the sender owns that origin.
+
+The child evaluates the predicate against the verified route-auth sender before
+`onMessage` can replace session auth. It evaluates callback-only requests too:
+you do not need `forwardPrincipal: true`, a forwarded end-user identity, or trace
+headers. A missing or refusing policy adds no cross-deployment credential
+permission. Anonymous transport requests receive no grant, even if the predicate
+returns `true`. A refused forwarded principal still rejects the request with 403;
+a throwing predicate rejects with 500.
+
+The granted origin, including its port, is saved with the delegation, never a
+JWT. Completion, failure, cancellation, input-request, authorization, and activity
+callbacks use this grant, including workflow-owned
+remote calls. Immediately before each POST, the sending runtime reads its own
+current OIDC token and sets `x-vercel-trusted-oidc-idp-token`. eve does not reuse
+the parent's incoming Authorization or protection token, or refresh credentials
+through a local SDK identity. Grants do not cross into another remote deployment;
+that deployment must authorize its own sender.
+
+Each message continuation with a callback evaluates `trustedForwarders` again;
+its binding applies to the turn started by that message. Policy removal or refusal
+affects new delegations, not already accepted work or its retries. A new message
+caller cannot inherit the previous caller's grant.
+
+An `inputResponses`-only request answers pending work under its existing callback
+binding and captured grant. It must omit both `callback` and `activityObserver`;
+eve rejects either field with HTTP 400, even if it repeats the current binding.
+Such an answer does not replace or revoke callback authority when policy changes.
+To establish a new binding, send a separate message request; `message` and
+`inputResponses` cannot be combined.
+
+The inbox consumer rejects malformed grants and mismatched destination origins.
+A stored grant whose origin no longer matches the callback destination also fails
+before sending; eve does not downgrade it to an unauthenticated callback. Existing private-address and callback path/token guards
+still apply. Only HTTPS destinations without URL credentials, wildcard hosts,
+loopback hosts, or private/reserved IP literals receive OIDC credentials.
+Redirects are never followed.
+
+Without a grant, existing same-deployment HTTPS callbacks remain eligible for the
+runtime token. Non-Vercel runtimes attach no ambient Vercel credential. On Vercel,
+a granted callback without a usable runtime token fails before sending; enable
+OIDC on the sending deployment. An expired runtime token is not refreshed by eve;
+callback HTTP 401 can indicate expiration or a missing parent Trusted Sources rule.
+
+Granted continuations require a child session running inbox wire v8. A session
+pinned to an older runtime rejects the delivery rather than discarding its grant;
+start a new remote session on the upgraded deployment. Older persisted inbox
+messages acquire no grant during migration.
+
 ## Forwarding the caller identity
 
 Outbound auth authenticates your _deployment_ to the remote, so by default the remote session runs as your calling app — not as the end user who is talking to your agent. That breaks per-user workloads on the remote deployment, most directly per-user [Vercel Connect](./auth-and-route-protection#tool-and-connection-auth), which requires an authenticated `user` principal on the session.

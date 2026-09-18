@@ -26,7 +26,8 @@ export interface ForwardedPrincipal {
 
 /**
  * Authorizes which transport-authenticated forwarders may assert a forwarded
- * principal. Receives the *verified* route-auth principal (who is asserting),
+ * principal and nominate an HTTPS callback origin for this deployment's own
+ * OIDC credential. Receives the *verified* route-auth principal (who is asserting),
  * never the forwarded identity (what is asserted).
  */
 export type TrustedForwarders = (forwarder: SessionAuthContext) => boolean | Promise<boolean>;
@@ -52,6 +53,7 @@ export type ResolvedForwardedPrincipal =
   | {
       readonly accepted: false;
       readonly auth: SessionAuthContext;
+      readonly trustedForwarder?: boolean;
     }
   | {
       readonly accepted: true;
@@ -92,6 +94,8 @@ const forwardedPrincipalSchema = z
  * predicate throws. Accepted contexts are stamped with
  * {@link FORWARDED_BY_ATTRIBUTE} before they are returned, so a custom
  * `onMessage` always sees the transport forwarder on the replaced principal.
+ * Callback-only requests evaluate the same policy without replacing session auth;
+ * refusal leaves their callback ungranted rather than rejecting the request.
  */
 export async function resolveForwardedPrincipal(input: {
   readonly trustedForwarders: TrustedForwarders | undefined;
@@ -99,8 +103,13 @@ export async function resolveForwardedPrincipal(input: {
   readonly payload: Record<string, unknown>;
 }): Promise<ResolvedForwardedPrincipal | Response> {
   const value = input.payload.forwardedPrincipal;
-  if (value === undefined) return { accepted: false, auth: input.forwarder };
+  if (value === undefined && input.payload.callback === undefined) {
+    return { accepted: false, auth: input.forwarder };
+  }
 
+  if (input.trustedForwarders === undefined && value === undefined) {
+    return { accepted: false, auth: input.forwarder };
+  }
   if (input.trustedForwarders === undefined) {
     return Response.json(
       { error: "This deployment does not accept a forwarded principal.", ok: false },
@@ -108,8 +117,8 @@ export async function resolveForwardedPrincipal(input: {
     );
   }
 
-  const parsed = parseForwardedPrincipal(value);
-  if (!parsed.ok) {
+  const parsed = value === undefined ? undefined : parseForwardedPrincipal(value);
+  if (parsed !== undefined && !parsed.ok) {
     return Response.json({ error: parsed.message, ok: false }, { status: 400 });
   }
 
@@ -125,7 +134,10 @@ export async function resolveForwardedPrincipal(input: {
       { status: 500 },
     );
   }
-  if (!accepted) {
+  if (parsed === undefined) {
+    return { accepted: false, auth: input.forwarder, trustedForwarder: accepted === true };
+  }
+  if (accepted !== true) {
     return Response.json(
       { error: "Caller is not authorized to assert a forwarded principal.", ok: false },
       { status: 403 },
